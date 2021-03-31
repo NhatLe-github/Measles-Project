@@ -1,6 +1,19 @@
 library(tidyverse)
 library(Hmisc)
 library(magrittr)
+require(geepack)
+require(xtable)
+require(doBy)
+require(readr)
+library(lubridate)
+library(matrixStats)
+# library(plotly)
+library(icd.data)
+library(cowplot)
+library(emmeans)
+library(splines)
+library(mitools)
+library(Epi)
 
 data.prepare <- function(data,option = 1,emigration.rate=0,seed = 1234) {
   # This function aims to clean the patients outcomes
@@ -494,14 +507,14 @@ data.transformed <- function(data,option=0,emigration.rate=0,seed=1234) {
 
 
 
-func2<-function(x,knots,coef,last.knots=6){
+func2<-function(x,knots,coef,time.max=6){
   ## This function computes the value of log incidence rate ratio of hospital admission after vs. 2yrs before MeV
   ## x is the time value
   ## knots is the knot that used for the spines function in the Poisson model
   ## coef is the coeficent of the time after measles
   ## last.knots is the right boundary knot 
   
-  c<-c(1,splines::ns(pmax(x-14/365,0), knots=knots-14/365, Boundary.knots = c(0,last.knots-14/365)))
+  c<-c(1,splines::ns(pmax(x-14/365,0), knots=knots-14/365, Boundary.knots = c(0,time.max-14/365)))
   val<-c%*%coef
   return(val[1])
 }
@@ -530,7 +543,7 @@ MCMC_estimate<-function(fit,interval,knots,last.knots){
 
 
 
-funct<-function(x,knots,coef,last.knots=9.8){
+funct<-function(x,knots,coef,time.max=9.8){
   ## This function computes the value of log incidence rate ratio of hospital admission after vs. 2yrs before MeV
   ## x is the time value
   ## knots is the knot that used for the spines function in the Poisson model
