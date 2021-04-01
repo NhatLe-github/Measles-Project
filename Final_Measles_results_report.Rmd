@@ -254,7 +254,7 @@ ydens <- axis_canvas(pmain, axis = "y", coord_flip = TRUE)+
 p1 <- insert_xaxis_grob(pmain, xdens, grid::unit(.2, "null"), position = "top")
 p2 <- insert_yaxis_grob(p1, ydens, grid::unit(.2, "null"), position = "right")
 ggdraw(p2)
-ggsave(file = "Results/Figures/Figures/Figure1.tiff",   # The directory you want to save the file in
+ggsave(file = "Results/Figures/Figure1.tiff",   # The directory you want to save the file in
     width = 7, # The width of the plot in inches
     height = 8, dpi=450) # The height of the plot in inches
 ggdraw(p2)
@@ -382,7 +382,7 @@ p<-ggplot(dat,aes(x=time.after.mv, y=pred)) + geom_line(size=.75,color="#31a354"
         legend.title = element_blank(),
         legend.key = element_rect(colour = NA),
         strip.text=element_text(face = "bold",size=15))  + coord_cartesian(ylim=c(-3,2),xlim=c(0,6)) 
-ggsave(file = "Results/Figures/Figures/Figure2B.tiff",   
+ggsave(file = "Results/Figures/Figure2B.tiff",   
     width = 7, 
     height = 8, dpi=450) 
 p
