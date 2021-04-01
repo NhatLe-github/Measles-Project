@@ -13,7 +13,7 @@ knitr::opts_chunk$set(
 )
 
 #rm(list = ls())
-source('Rfunctions18EN.R', echo = F)
+source('Rfunctions_measles.R', echo = F)
 options(width = 200)
 set.seed(123456)
 data.raw <- as.data.frame(read_csv("C:/Users/nhatlth/OneDrive/Measles_paper/Final Paper/Project_Measles_18EN/R-codes/Data/measa.csv"))
