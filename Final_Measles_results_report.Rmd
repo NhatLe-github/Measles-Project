@@ -13,7 +13,7 @@ knitr::opts_chunk$set(
 )
 
 #rm(list = ls())
-source('Rfunctions18EN.R', echo = F)
+source('Rfunctions_measles.R', echo = F)
 options(width = 200)
 set.seed(123456)
 data.raw <- as.data.frame(read_csv("C:/Users/nhatlth/OneDrive/Measles_paper/Final Paper/Project_Measles_18EN/R-codes/Data/measa.csv"))
@@ -171,12 +171,12 @@ knitr::kable(dat.sum_wide)
 
 ```{r eval=FALSE, fig.height=9, fig.width=9, message=FALSE, warning=FALSE, include=FALSE}
 library(ggExtra)
-dat.tmp2<-data.total.main
-dat.tmp2$time.after.mv<-ifelse(dat.tmp2$period=="before",dat.tmp2$age.at.infection-dat.tmp2$age.at.measles.y,dat.tmp2$time.after.mv)
-save(dat.tmp2,file="C:/Users/nhatlth/OneDrive/Measles_paper/Final Paper/Project_Measles_18EN/R-codes/Data/dat_raw_summary_incidence_rate_2.Rdata")
-dat.tmp<-dat.tmp2 %>% group_by(patid,age.at.infection,time.after.mv,period) %>% dplyr::summarise(cases=sum(status),.groups="keep") %>% ungroup() %>% as.data.frame()
-dat.tmp <- subset(dat.tmp,cases>0)
-save(dat.tmp,file="C:/Users/nhatlth/OneDrive/Measles_paper/Final Paper/Project_Measles_18EN/R-codes/Data/dat_raw_summary_incidence_rate.Rdata")
+# dat.tmp2<-data.total.main
+# dat.tmp2$time.after.mv<-ifelse(dat.tmp2$period=="before",dat.tmp2$age.at.infection-dat.tmp2$age.at.measles.y,dat.tmp2$time.after.mv)
+# save(dat.tmp2,file="C:/Users/nhatlth/OneDrive/Measles_paper/Final Paper/Project_Measles_18EN/R-codes/Data/dat_raw_summary_incidence_rate_2.Rdata")
+# dat.tmp<-dat.tmp2 %>% group_by(patid,age.at.infection,time.after.mv,period) %>% dplyr::summarise(cases=sum(status),.groups="keep") %>% ungroup() %>% as.data.frame()
+# dat.tmp <- subset(dat.tmp,cases>0)
+#save(dat.tmp,file="C:/Users/nhatlth/OneDrive/Measles_paper/Final Paper/Project_Measles_18EN/R-codes/Data/dat_raw_summary_incidence_rate.Rdata")
 load(file = "C:/Users/nhatlth/OneDrive/Measles_paper/Final Paper/Project_Measles_18EN/R-codes/Data/dat_raw_summary_incidence_rate.Rdata")
 load(file = "C:/Users/nhatlth/OneDrive/Measles_paper/Final Paper/Project_Measles_18EN/R-codes/Data/dat_raw_summary_incidence_rate_2.Rdata")
 
@@ -205,7 +205,7 @@ ydens <- axis_canvas(pmain, axis = "y", coord_flip = TRUE)+
 p1 <- insert_xaxis_grob(pmain, xdens, grid::unit(.2, "null"), position = "top")
 p2 <- insert_yaxis_grob(p1, ydens, grid::unit(.2, "null"), position = "right")
 ggdraw(p2)
-# ggsave(file = "Results/Figures/Figures/Figure1.tiff",   # The directory you want to save the file in
+# ggsave(file = "Results/Figures/Figure1.tiff",   # The directory you want to save the file in
 #     width = 7, # The width of the plot in inches
 #     height = 8, dpi=450) # The height of the plot in inches
 # ggdraw(p2)
@@ -254,7 +254,7 @@ ydens <- axis_canvas(pmain, axis = "y", coord_flip = TRUE)+
 p1 <- insert_xaxis_grob(pmain, xdens, grid::unit(.2, "null"), position = "top")
 p2 <- insert_yaxis_grob(p1, ydens, grid::unit(.2, "null"), position = "right")
 ggdraw(p2)
-ggsave(file = "Results/Figures/Figures/Figure1.tiff",   # The directory you want to save the file in
+ggsave(file = "Results/Figures/Figure1.tiff",   # The directory you want to save the file in
     width = 7, # The width of the plot in inches
     height = 8, dpi=450) # The height of the plot in inches
 ggdraw(p2)
@@ -298,24 +298,6 @@ save(fit.gee.main,file="Results/Final/fit_gee_main.Rdata")
 * We fit the Poisson marginal model with cluster (patient), the current age (age.at.infection) and time after MeV
 
 
-```{r eval=FALSE, include=FALSE}
-# ## We fit the Poisson regression mixed effect model with patient is a random intercept, the current age (age.at.infection) and time after MeV (time.after.mv) 
-# ## are the main covariates.
-# library(rstanarm)
-# 
-# #id<-sample(unique(data.total.main$patid),50,replace=F)
-# 
-# start_time <- Sys.time()
-# fit.glmer.main<- stan_glmer(status~ sex + ns(age.at.infection,kn=knots.age,Bo = c(0,age.max))+I(time.after.mv>=14/365)+
-#              ns(pmax(time.after.mv-14/365,0),kn=knots.time.af.mv-14/365,Bo = c(0,time.max-14/365))+(1|patid),family=poisson(link = "log"),data = data.total.main,offset=offset_time,QR = FALSE,chains=3)
-# end_time <- Sys.time()
-# (time_consumed1<-end_time - start_time)
-# save(fit.glmer.main,file="Results/Final/fit_glmer_main.Rdata")
-```
-
-
-
-
 ```{r message=FALSE, warning=FALSE, include=FALSE}
 load(file="Results/Final/fit_gee_main.Rdata")
 time.after.mv<-seq(2/52,10,by=0.01)
@@ -331,24 +313,24 @@ dat$phi<-pred[,6]
 
 ```{r message=FALSE, warning=FALSE, include=FALSE}
 load(file="Results/Final/fit_gee_main.Rdata")
-Time.est<-Time_estimate(fit.gee.main,interval = c(2/52,1.5),knots=knots.time.af.mv,last.knots=5)
+Time.est<-Time_estimate(fit.gee.main,interval = c(2/52,1.5),knots=knots.time.af.mv,time.max=5)
 ```
 
 It resolves after at least `r Time.est` months.
 
 ```{r message=FALSE, warning=FALSE, include=FALSE, paged.print=FALSE}
 #Make the interpreation table of the regression
-time.after.mv<-c(14/365,21/365,30/365,60/365,90/365,240/365,335/365,1,1.5,2,3,4,5,5.5,6)
+time.after.mv<-c(14/365,21/365,30.4/365,60.8/365,90.25/365,182.5/365,273.8/365,1,1.5,2,3,4,5,5.5,6)
 l<-length(time.after.mv)
 mat<-as.matrix(ns(pmax(time.after.mv-14/365,0),kn=knots.time.af.mv-14/365,Bo = c(0,time.max-14/365))-matrix(rep(ns(0,kn=knots.time.af.mv-14/365,Bo = c(0,time.max-14/365)),each=l),nrow=l))
 mat<-cbind(matrix(rep(rep(0,10),l),ncol=10),rep(1,l),mat)
 
 pred<- my.ci.lin(fit.gee.main, mat, Exp=TRUE) 
-IRR.tab<-data.frame(time.after.mv=c(14/365,21/365,30/365,60/365,90/365,240/365,335/365,1,1.5,2,3,4,5,5.5,6),age.at.infection=0,offset_time=0)
+IRR.tab<-data.frame(time.after.mv=c(14/365,21/365,30.4/365,60.8/365,90.25/365,182.5/365,273.8/365,1,1.5,2,3,4,5,5.5,6),age.at.infection=0,offset_time=0)
 IRR.tab$pred<-pred[,5]
 IRR.tab$plo<-pred[,6]
 IRR.tab$phi<-pred[,7]
-IRR.tab$time.after.mv <- c("2 weeks","3 weeks","1 month","2 months","3 months","8 months","11 months", "1 year","1.5 year","2 years","3 years","4 years","5 years","5.5 years","6 years")
+IRR.tab$time.after.mv <- c("2 weeks","3 weeks","1 month","2 months","3 months","6 months","9 months", "1 year","1.5 year","2 years","3 years","4 years","5 years","5.5 years","6 years")
 IRR.tab$IRR <- paste(round(IRR.tab$pred,2),"95% CI(",round(IRR.tab$plo,2),",",round(IRR.tab$phi,2),")")
 IRR.tab <- IRR.tab[,c("time.after.mv","IRR")]
 colnames(IRR.tab) <- c("Time after measles","Incidence rate ratio(95% CI)")
@@ -369,7 +351,7 @@ knitr::kable(IRR.tab)
 ```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
 p<-ggplot(dat,aes(x=time.after.mv, y=pred)) + geom_line(size=.75,color="#31a354")+
   geom_ribbon(data=dat,aes(ymin=plo, ymax=phi, x=time.after.mv), alpha = 0.3,fill="#31a354") +
-  scale_y_continuous("IRR relative to before measles",breaks = log(c(1/20,1/8,1/3,1,3,8,50)),labels=c(expression(1/20),expression(1/8),expression(1/3),1,3,8,50))+
+  scale_y_continuous("IRR relative to before measles",breaks = log(c(1/50,1/20,1/8,1/3,1,3,8,50)),labels=c(expression(1/50),expression(1/20),expression(1/8),expression(1/3),1,3,8,50))+
   scale_x_continuous("Time after measles infection [years]",limits = c(0,10),breaks=c(0,1:10),labels=c("0",1:10))+
   geom_hline(yintercept=0, linetype="dashed", color = "black")+
   theme_bw() +
@@ -381,8 +363,8 @@ p<-ggplot(dat,aes(x=time.after.mv, y=pred)) + geom_line(size=.75,color="#31a354"
         legend.text = element_text(size = 15),
         legend.title = element_blank(),
         legend.key = element_rect(colour = NA),
-        strip.text=element_text(face = "bold",size=15))  + coord_cartesian(ylim=c(-3,2),xlim=c(0,6)) 
-ggsave(file = "Results/Figures/Figures/Figure2B.tiff",   
+        strip.text=element_text(face = "bold",size=15))  + coord_cartesian(ylim=c(-4,2),xlim=c(0,6)) 
+ggsave(file = "Results/Figures/Figure2B.tiff",   
     width = 7, 
     height = 8, dpi=450) 
 p
@@ -431,18 +413,13 @@ p<-ggplot(dat,aes(x=age.at.infection, y=pred,group=time.after.mv,fill=time.after
         legend.key = element_rect(colour = NA),
         strip.text=element_text(face = "bold",size=15))+scale_fill_manual(values=c("#ffeda0","#de2d26", "#31a354","#386cb0","#c51b8a","black"))+scale_colour_manual(values=c("#ffeda0","#de2d26", "#31a354","#386cb0","#c51b8a","black"))+scale_size_manual(values=c(2.5,rep(1,5)))
 
-ggsave(file = "Results/Figures/Figures/Figure2A.tiff",   
+ggsave(file = "Results/Figures/Figure2A.tiff",   
     width = 15, 
     height = 8, dpi=450) 
 p
 ```
 
 #### Figure 2C: Incidence rate difference  of hopistal admission post-MeV vs. pre-MeV by age.
-
-
-
-
-
 
 
 ```{r include=FALSE}
@@ -494,7 +471,7 @@ p<-ggplot(dat,aes(x=age.at.infection, y=absolute_diff,group=time.after.mv,fill=t
         legend.title = element_blank(),
         legend.key = element_rect(colour = NA),
         strip.text=element_text(face = "bold",size=15))+scale_fill_manual(values=c("#2ca25f","#de2d26", "#8856a7","#43a2ca","#feb24c","#636363"))+scale_colour_manual(values=c("#2ca25f","#de2d26", "#8856a7","#43a2ca","#feb24c","#636363"))
-ggsave(file = "Results/Figures/Figures/Figure2C.tiff",   
+ggsave(file = "Results/Figures/Figure2C.tiff",   
     width = 15, 
     height = 8, dpi=450) 
 p
@@ -504,35 +481,6 @@ p
 
 ### Analysis with Interaction with age and sex and time since measles
 
-```{r eval=FALSE, message=FALSE, warning=FALSE, include=FALSE, paged.print=TRUE}
-# start_time <- Sys.time()
-# fit.gee.interaction <- geeglm(status~ ns(age.at.infection,kn=knots.age,Bo = c(0,age.max))+I(time.after.mv>=14/365)+
-#              ns(pmax(time.after.mv-14/365,0),kn=knots.time.af.mv-14/365,Bo = c(0,time.max-14/365))+ns(age.at.infection,kn=c(1.5),Bo = c(0,age.max)):ns(pmax(time.after.mv-14/365,0),kn=c(0.5)-14/365,Bo = c(0,time.max-14/365)),id=patid,corstr="exchangeable",family=poisson(link = "log"),data = data.total.main,offset=offset_time)
-# end_time <- Sys.time()
-# (time_consumed1<-end_time - start_time)
-# save(fit.gee.interaction,file="Results/fit_gee_interaction.Rdata")
-```
-
-```{r tab23, echo=FALSE,results = "asis"}
-load(file="Results/fit_gee_interaction.Rdata")
-tab<-geeglm.summary(fit.gee.interaction)
-knitr::kable(tab)
-```
-
-```{r eval=FALSE, message=FALSE, warning=FALSE, include=FALSE, paged.print=TRUE}
-# start_time <- Sys.time()
-# fit.gee.interaction.sex <- geeglm(status~ sex+ns(age.at.infection,kn=knots.age,Bo = c(0,age.max))+I(time.after.mv>=14/365)+
-#              ns(pmax(time.after.mv-14/365,0),kn=knots.time.af.mv-14/365,Bo = c(0,time.max-14/365))+ns(age.at.infection,kn=knots.age,Bo = c(0,age.max)):sex+ns(pmax(time.after.mv-14/365,0),kn=knots.time.af.mv-14/365,Bo = c(0,time.max-14/365)):sex,id=patid,corstr="exchangeable",family=poisson(link = "log"),data = data.total.main,offset=offset_time)
-# end_time <- Sys.time()
-# (time_consumed1<-end_time - start_time)
-# save(fit.gee.interaction.sex,file="Results/fit_gee_interaction_sex.Rdata")
-```
-
-```{r tab234, eval=FALSE, include=FALSE}
-load(file="Results/fit_gee_interaction_sex.Rdata")
-tab<-geeglm.summary(fit.gee.interaction.sex)
-knitr::kable(tab)
-```
 
 ```{r eval=FALSE, message=FALSE, warning=FALSE, include=FALSE, paged.print=TRUE}
 start_time <- Sys.time()
@@ -550,23 +498,16 @@ save(fit.gee.interaction.overall,file="Results/fit_gee_interaction_overall.Rdata
 
 
 ```{r include=FALSE}
-# load("Results/fit_gee_interaction.Rdata")
-# ano_interact<-anova(fit.gee.interaction)
-# ano_interact.sex<-anova(fit.gee.interaction.sex)
-#ano_interact.sex<-anova(fit.gee.interaction.sex,"ns(age.at.infection, kn = knots.age, Bo = c(0, age.max)):sex+I(time.after.mv >= 14/365):sex +ns(pmax(time.after.mv - 14/365, 0), kn = knots.time.af.mv - 14/365, Bo = c(0, time.max - 14/365)):sex")
-# ano_interact_overall<-anova(fit.gee.interaction.overall,"ns(age.at.infection, kn = c(1.5), Bo = c(0, age.max)):ns(pmax(time.after.mv -   14/365, 0), kn = c(0.5) - 14/365, Bo = c(0, time.max - 
-#     14/365)) + ns(age.at.infection, kn = knots.age, Bo = c(0, 
-#     age.max)):sex + ns(pmax(time.after.mv - 14/365, 0), kn = knots.time.af.mv - 
-#     14/365, Bo = c(0, time.max - 14/365)):sex")
-#save(ano_interact_overall,file="Results/ano_interact_overall_compare.Rdata")
+load("Results/fit_gee_interaction_overall.Rdata")
+ano_interact_overall<-anova(fit.gee.interaction.overall,"ns(age.at.infection, kn = c(1.5), Bo = c(0, age.max)):ns(pmax(time.after.mv -   14/365, 0), kn = c(0.5) - 14/365, Bo = c(0, time.max -
+    14/365)) + ns(age.at.infection, kn = knots.age, Bo = c(0,
+    age.max)):sex + ns(pmax(time.after.mv - 14/365, 0), kn = knots.time.af.mv -
+    14/365, Bo = c(0, time.max - 14/365)):sex")
+save(ano_interact_overall,file="Results/ano_interact_overall_compare.Rdata")
 
-# save(ano_interact,file="Results/anova_interact_age_time_compare.Rdata")
-# save(ano_interact,file="Results/anova_interact_age_time_compare.Rdata")
-# save(ano_interact.sex,file="Results/anova_interact_sex_compare.Rdata")
 
 
 load(file="Results/fit_gee_interaction_overall.Rdata")
-load(file="Results/ano_interact_overall_compare.Rdata")
 p.val.overall<-1-pchisq(sum(ano_interact_overall$X2[5:7]),df=sum(ano_interact_overall$Df[5:7]))
 p.val.age.time<-ano_interact_overall$`P(>|Chi|)`[5]
 p.val.sex.age<-ano_interact_overall$`P(>|Chi|)`[6]
@@ -649,13 +590,13 @@ load(file="Results/fit_gee_worse.Rdata")
 
 ```{r message=FALSE, warning=FALSE, include=FALSE, paged.print=FALSE}
 #Make the interpreation table of the regression
-time.after.mv<-c(14/365,21/365,30/365,60/365,90/365,240/365,335/365,1,1.5,2,3,4,5,5.5,6)
+time.after.mv<-c(14/365,21/365,30.4/365,60.8/365,90.25/365,182.5/365,273.8/365,1,1.5,2,3,4,5,5.5,6)
 l<-length(time.after.mv)
 mat<-as.matrix(ns(pmax(time.after.mv-14/365,0),kn=knots.time.af.mv-14/365,Bo = c(0,time.max-14/365))-matrix(rep(ns(0,kn=knots.time.af.mv-14/365,Bo = c(0,time.max-14/365)),each=l),nrow=l))
 mat<-cbind(matrix(rep(rep(0,10),l),ncol=10),rep(1,l),mat)
 
 pred<- my.ci.lin(fit.gee.worse, mat, Exp=TRUE) 
-IRR.tab<-data.frame(time.after.mv=c(14/365,21/365,30/365,60/365,90/365,240/365,335/365,1,1.5,2,3,4,5,5.5,6),age.at.infection=0,offset_time=0)
+IRR.tab<-data.frame(time.after.mv=c(14/365,21/365,30.4/365,60.8/365,90.25/365,182.5/365,273.8/365,1,1.5,2,3,4,5,5.5,6),age.at.infection=0,offset_time=0)
 IRR.tab$pred<-pred[,5]
 IRR.tab$plo<-pred[,6]
 IRR.tab$phi<-pred[,7]
@@ -775,17 +716,17 @@ load(file="Results/fit_Sens1_sex.Rdata")
 ```{r message=FALSE, warning=FALSE, include=FALSE, paged.print=FALSE}
 #Make the interpreation table of the regression
 load("Results/fit_Sens1_sex.Rdata")
-time.after.mv<-c(14/365,21/365,30/365,60/365,90/365,240/365,335/365,1,1.5,2,3,4,5,5.5,6)
+time.after.mv<-c(14/365,21/365,30.4/365,60.8/365,90.25/365,182.5/365,273.8/365,1,1.5,2,3,4,5,5.5,6)
 l<-length(time.after.mv)
 mat<-as.matrix(ns(pmax(time.after.mv-14/365,0),kn=knots.time.af.mv-14/365,Bo = c(0,time.max-14/365))-matrix(rep(ns(0,kn=knots.time.af.mv-14/365,Bo = c(0,time.max-14/365)),each=l),nrow=l))
 mat<-cbind(matrix(rep(rep(0,10),l),ncol=10),rep(1,l),mat)
 
 pred<- my.ci.lin.mi(fit, mat, Exp=T) 
-IRR.tabS1<-data.frame(time.after.mv=c(14/365,21/365,30/365,60/365,90/365,240/365,335/365,1,1.5,2,3,4,5,5.5,6),age.at.infection=0,offset_time=0)
+IRR.tabS1<-data.frame(time.after.mv=c(14/365,21/365,30.4/365,60.8/365,90.25/365,182.5/365,273.8/365,1,1.5,2,3,4,5,5.5,6),age.at.infection=0,offset_time=0)
 IRR.tabS1$pred<-pred[,5]
 IRR.tabS1$plo<-pred[,6]
 IRR.tabS1$phi<-pred[,7]
-IRR.tabS1$time.after.mv <- c("2 weeks","3 weeks","1 month","2 months","3 months","8 months","11 months", "1 year","1.5 year","2 years","3 years","4 years","5 years","5.5 years","6 years")
+IRR.tabS1$time.after.mv <- c("2 weeks","3 weeks","1 month","2 months","3 months","6 months","9 months", "1 year","1.5 year","2 years","3 years","4 years","5 years","5.5 years","6 years")
 IRR.tabS1$IRR <- paste(round(IRR.tabS1$pred,2),"95% CI(",round(IRR.tabS1$plo,2),",",round(IRR.tabS1$phi,2),")")
 IRR.tabS1 <- IRR.tabS1[,c("time.after.mv","IRR")]
 colnames(IRR.tabS1) <- c("Time after measles","Incidence rate ratio(95% CI)")
@@ -1012,13 +953,13 @@ p
 
 ```{r message=FALSE, warning=FALSE, include=FALSE, paged.print=FALSE}
 #Make the interpreation table of the regression
-time.after.mv<-c(14/365,21/365,30/365,60/365,90/365,240/365,335/365,1,1.5,2,3,4,5,5.5,6)
+time.after.mv<-c(14/365,21/365,30.4/365,60.8/365,90.25/365,182.5/365,273.8/365,1,1.5,2,3,4,5,5.5,6)
 l<-length(time.after.mv)
 mat<-as.matrix(ns(pmax(time.after.mv-14/365,0),kn=knots.time.af.mv-14/365,Bo = c(0,time.max-14/365))-matrix(rep(ns(0,kn=knots.time.af.mv-14/365,Bo = c(0,time.max-14/365)),each=l),nrow=l))
 mat<-cbind(matrix(rep(rep(0,10),l),ncol=10),rep(1,l),mat)
 
 pred<- my.ci.lin(fit.gee.sens_13yrs, mat, Exp=TRUE) 
-IRR.tab<-data.frame(time.after.mv=c(14/365,21/365,30/365,60/365,90/365,240/365,335/365,1,1.5,2,3,4,5,5.5,6),age.at.infection=0,offset_time=0)
+IRR.tab<-data.frame(time.after.mv=c(14/365,21/365,30.4/365,60.8/365,90.25/365,182.5/365,273.8/365,1,1.5,2,3,4,5,5.5,6),age.at.infection=0,offset_time=0)
 IRR.tab$pred<-pred[,5]
 IRR.tab$plo<-pred[,6]
 IRR.tab$phi<-pred[,7]
