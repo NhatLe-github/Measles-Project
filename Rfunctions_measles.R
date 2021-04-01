@@ -136,9 +136,11 @@ data.prepare <- function(data,option = 1,emigration.rate=0,seed = 1234) {
                    time.at.lastfup = pmin(time.at.15birthday,as.Date("2015-12-31",origin = "1970-01-01")),
                    time.at.lastfup = as.Date(ifelse(outcome == "dead",data$date_death,time.at.lastfup),origin = "1970-01-01"),
                    time.dis.to.lastfup = as.numeric(difftime(time.at.lastfup,date.dis,units = "days"))) 
+  
   data.tmp <-data %>% group_by(patid) %>% summarise(time.at.lastfup=min(time.at.lastfup),.groups="keep") %>% ungroup()
   data$time.at.lastfup<-NULL
   data %<>%left_join(data.tmp,by="patid") 
+  
   ### Remove all patients who admitted after the last follow-up time
   ### create a variable measles, and infection
   data  %<>% filter(time.dis.to.lastfup >= 0) %>% 
