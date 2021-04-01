@@ -363,7 +363,11 @@ p<-ggplot(dat,aes(x=time.after.mv, y=pred)) + geom_line(size=.75,color="#31a354"
         legend.text = element_text(size = 15),
         legend.title = element_blank(),
         legend.key = element_rect(colour = NA),
+<<<<<<< HEAD
         strip.text=element_text(face = "bold",size=15))  + coord_cartesian(ylim=c(-4,2),xlim=c(0,6)) 
+=======
+        strip.text=element_text(face = "bold",size=15))  + coord_cartesian(ylim=c(-3,2),xlim=c(0,6)) 
+>>>>>>> 2c6a73c79342a29c43976791de63947729a97cdb
 ggsave(file = "Results/Figures/Figure2B.tiff",   
     width = 7, 
     height = 8, dpi=450) 
