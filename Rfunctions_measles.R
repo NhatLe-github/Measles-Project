@@ -7,7 +7,6 @@ require(doBy)
 require(readr)
 library(lubridate)
 library(matrixStats)
-# library(plotly)
 library(icd.data)
 library(cowplot)
 library(emmeans)
@@ -25,7 +24,7 @@ data.prepare <- function(data,option = 1,emigration.rate=0,seed = 1234) {
   # # option = 2 if  we generate the emigration patient out of the HCMC city
   
   #### ------------------------------ Rule to derive dataset ------------------------------ ####
-  # 1. Only the infection cases will be included in the analysis
+  # 1. Only the admissions due to infection will be included in the analysis
   # 2. Impute the birth day for who doesn't have birthday record but have the birth years. 
   #     We immputed it as 30June of the birth years. Who doesn't have birth year 
   #     will be removed from the analysis.
@@ -34,7 +33,7 @@ data.prepare <- function(data,option = 1,emigration.rate=0,seed = 1234) {
   #     merge them into one espisode of new infections
   # 4. We assume that for each episode of admission is due to one main infection type
   # 5. All measles second infections which happened after 21 days will be excluded 
-  #     from the analysis because later we dont know how identify the before and after events
+  #     from the analysis 
   # 6. All the second measles admission within 21 days after the first admission
   #     will be considered as the measles complicated
   
@@ -513,7 +512,7 @@ func2<-function(x,knots,coef,time.max=6){
   ## x is the time value
   ## knots is the knot that used for the spines function in the Poisson model
   ## coef is the coeficent of the time after measles
-  ## last.knots is the right boundary knot 
+  ## time.max is the right boundary knot 
   
   c<-c(1,splines::ns(pmax(x-14/365,0), knots=knots-14/365, Boundary.knots = c(0,time.max-14/365)))
   val<-c%*%coef
@@ -526,20 +525,20 @@ funct<-function(x,knots,coef,time.max=9.8){
   ## x is the time value
   ## knots is the knot that used for the spines function in the Poisson model
   ## coef is the coeficent of the time after measles
-  ## last.knots is the right boundary knot 
+  ## time.max is the right boundary knot 
   
-  c<-c(1,splines::ns(pmax(x-14/365,0), knots=knots-14/365, Boundary.knots = c(0,last.knots-14/365)))
+  c<-c(1,splines::ns(pmax(x-14/365,0), knots=knots-14/365, Boundary.knots = c(0,time.max-14/365)))
   val<-c%*%coef
   return(val[1])
 }
-Time_estimate<-function(fit,interval,knots,last.knots){
+Time_estimate<-function(fit,interval,knots,time.max){
   ## This function find the zeros of the equation "log incidence rate ratio of hospital admission after vs. 2yrs before MeV =0 "
   ## fit is the fitted object from the Poisson mixed effect model
   ## interval is the anticipated range of the interval that the zeros contained
   ## knots is the knot that used for the spines function in the Poisson model
-  ## last.knots is the right boundary knot
+  ## time.max is the right boundary knot
   extend<-ifelse(interval[1]>0.5,"upX","downX")
-  e <- try( d <-uniroot(funct, c(interval[1], interval[2]), tol = 1e-10,extendInt=extend, knots=knots,coef=unname(coef(fit)[-c(1:10)]),last.knots=last.knots))
+  e <- try( d <-uniroot(funct, c(interval[1], interval[2]), tol = 1e-10,extendInt=extend, knots=knots,coef=unname(coef(fit)[-c(1:10)]),time.max=time.max))
   if (class(e) == "try-error") {
     return(Inf)
   } else {
