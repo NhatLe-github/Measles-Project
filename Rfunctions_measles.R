@@ -136,7 +136,9 @@ data.prepare <- function(data,option = 1,emigration.rate=0,seed = 1234) {
                    time.at.lastfup = pmin(time.at.15birthday,as.Date("2015-12-31",origin = "1970-01-01")),
                    time.at.lastfup = as.Date(ifelse(outcome == "dead",data$date_death,time.at.lastfup),origin = "1970-01-01"),
                    time.dis.to.lastfup = as.numeric(difftime(time.at.lastfup,date.dis,units = "days"))) 
-  
+  data.tmp <-data %>% group_by(patid) %>% summarise(time.at.lastfup=min(time.at.lastfup),.groups="keep") %>% ungroup()
+  data$time.at.lastfup<-NULL
+  data %<>%left_join(data.tmp,by="patid") 
   ### Remove all patients who admitted after the last follow-up time
   ### create a variable measles, and infection
   data  %<>% filter(time.dis.to.lastfup >= 0) %>% 
@@ -405,7 +407,7 @@ data.transformed <- function(data,option=0,emigration.rate=0,seed=1234) {
     # update the new discharge date of measles
     data.tmp.after %<>% mutate(date.last14.measles = date.admit.measles + 14) %>% 
                         arrange(patid,date.admit,date.dis) %>% group_by(patid) %>% 
-                        dplyr::mutate(selected.removed = ifelse(!is.na(lag(patid,1)) & (date.last14.measles > date.admit),1,0),
+                        dplyr::mutate(selected.removed = ifelse(!is.na(lag(patid,1)) & (date.admit<= date.last14.measles),1,0),
                         date.dis.measles.updated = pmax(date.last14.measles,date.dis.measles)) %>% ungroup() %>% 
                         arrange(patid,desc(date.admit)) 
     
@@ -425,36 +427,42 @@ data.transformed <- function(data,option=0,emigration.rate=0,seed=1234) {
     data.tmp.after %<>% mutate(time.at.lastfup = as.Date(pmax(time.at.lastfup,date.dis.measles),origin = "1970-01-01"))
   }
   
-  ### Define the flag.index.impute variable is the indication of MeV event without other event after 
+  ### Define the flag.index.impute variable is the indication of type of event 
+  ### flag.index.impute =1 if MeV without subsequent other event
+  ### flag.index.impute =2 if MeV with subsequent other event
+  ### flag.index.impute =3 if  other event
   data.tmp.after %<>% arrange(patid,desc(date.admit)) %>% group_by(patid) %>% 
-                      dplyr::mutate(flag.index.impute = ifelse(is.na(lag(patid,1)) & (period == "measles"),1,0)) %>% ungroup()
-  data.tmp.after$flag.index.impute[1] <- 1
+    dplyr::mutate(flag.index.impute = ifelse(period == "after",3,
+                                             ifelse(is.na(lag(patid,1)),1,2))) %>% ungroup()
   data.tmp.after %<>% arrange(patid,date.admit,date.dis)
   
   
-  ### Compute obs.time.from.MeV and set obs.time.from.MeV==-14 for measles cases
-  ### Identify time to follow-up for each patient
-  data.tmp.after.tmp <- data.tmp.after %>% filter(!((period == "measles") & (flag.index.impute == 0))) %>% 
+  ### Compute obs.time.since.MeV and set obs.time.since.MeV==-14 for measles cases
+  ### Compute time to follow-up for each patient for the group of non MeV event or MeV event with subsequent other events
+  data.tmp.after.tmp <- data.tmp.after %>% filter(flag.index.impute %in%c(1,3)) %>% 
     arrange(patid,date.admit,date.dis) %>% 
-    mutate(obs.time.from.MeV = ifelse(period != "measles",as.numeric(difftime(date.admit,date.dis.measles,units="days")),0),# the duration from measles infection to the other admission
+    mutate(obs.time.since.MeV = ifelse(period == "after",as.numeric(difftime(date.admit,date.dis.measles,units="days")),0),# the duration from measles infection to the other admission
            time.dis.MeV.to.lastfup = as.numeric(difftime(time.at.lastfup,date.dis.measles,units="days")),
            hospitalization.measles = as.numeric(difftime(date.dis.measles,date.admit.measles,units="days"))) 
   (n10<-length(unique(data.tmp.after.tmp$patid)))
   
   data.tmp.after.tmp %<>%  arrange(patid,date.admit,date.dis) %>% 
-    mutate(lag.patid  = lag(data.tmp.after.tmp$patid,1),
-           obs.time.from.MeV = ifelse(obs.time.from.MeV == 0 & flag.index.impute == 0,1,obs.time.from.MeV),
-           lag.obs.time.from.MeV = lag(data.tmp.after.tmp$obs.time.from.MeV,1),
-           time.start = ifelse(lag.patid == patid,lag.obs.time.from.MeV+lag(hospitalization,1),0))
+    mutate(lag.patid  = lag(patid,1),
+           # obs.time.since.MeV = ifelse(obs.time.since.MeV == 0 & flag.index.impute == 0,1,obs.time.since.MeV),
+           lag.obs.time.since.MeV = lag(obs.time.since.MeV,1),
+           time.start = ifelse(lag.patid == patid,lag.obs.time.since.MeV+lag(hospitalization,1),0))
   data.tmp.after.tmp$time.start[1] <- 0
   (n10<-length(unique(data.tmp.after.tmp$patid)))
-  data.tmp.after.tmp %<>% mutate(time.stop   = ifelse(flag.index.impute == 1,time.dis.MeV.to.lastfup,obs.time.from.MeV),
+  
+  
+  ## The event time of flag.index.impute == 3 were the time.stop of all preceeding event including MeV. 
+  data.tmp.after.tmp %<>% mutate(time.stop   = ifelse(flag.index.impute == 1,time.dis.MeV.to.lastfup,obs.time.since.MeV),
                                  status   = ifelse(flag.index.impute == 1,0,1)) 
   (n10<-length(unique(data.tmp.after.tmp$patid)))
   
   ############################## Impute the following up time up to the last flup ############
-  ############################## We remove all the cases without event after MeV. 
-  data.impute <- data.tmp.after %>% filter(flag.index.impute == 0)
+  ## compute the time.start and time.stop after last event
+  data.impute <- data.tmp.after %>% filter(flag.index.impute ==3)
   id.impute<-unique(data.impute$patid)
   dat.impute <- data.tmp.after.tmp %>% filter(patid%in%id.impute) %>% 
                                        mutate(time.start = time.stop + hospitalization) %>% 
@@ -462,8 +470,7 @@ data.transformed <- function(data,option=0,emigration.rate=0,seed=1234) {
 
   ### chose the last row
   index <- lastobs(dat.impute$patid)
-  dat.impute  %<>%  slice(index) %>% 
-                    mutate(time.stop = time.dis.MeV.to.lastfup,
+  dat.impute  %<>%  slice(index) %>% mutate(time.stop = time.dis.MeV.to.lastfup,
                            status = 0) 
   data.tmp.after  <- rbind(data.tmp.after.tmp,dat.impute)
   ### Remove all the case without event due to dead or migration out of the city i.e. no follow-up.

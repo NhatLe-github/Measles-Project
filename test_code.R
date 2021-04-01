@@ -1,4 +1,5 @@
 # N= choose number of test id
+data.raw <- as.data.frame(read_csv("C:/Users/nhatlth/OneDrive/Measles_paper/Final Paper/Project_Measles_18EN/R-codes/Data/measa.csv"))
 data.raw %<>% mutate(outcome=ifelse(is.na(outcome),"unknown",outcome)) %<>% rename(patid=iduse) %>% arrange(patid,date.admit,date.dis)
 
 N=10
@@ -24,6 +25,11 @@ dat.test %<>% mutate(time.ad.measles.to.ad=as.numeric(difftime(date.admit,date.a
                      time.dis.MeV.to.lastfup = as.numeric(difftime(time.at.lastfup,date.dis.measles,units = "days")),
                      age.at.admit.d = as.numeric(difftime(date.admit,dob,units = "days"))) %>% 
               mutate(hospitalization=as.numeric(difftime(date.admit,date.dis,units = "days")))
+
+data.tmp <-dat.test %>% group_by(patid) %>% summarise(time.at.lastfup=min(time.at.lastfup),.groups="keep") %>% ungroup()
+dat.test$time.at.lastfup<-NULL
+dat.test %<>%left_join(data.tmp,by="patid") 
+
 
 dat.test %<>% 
   mutate(period = as.factor(ifelse(time.ad.measles.to.ad > 0,"after",ifelse(time.ad.measles.to.ad < 0,"before","measles")))) %>% 
