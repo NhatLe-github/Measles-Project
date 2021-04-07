@@ -291,15 +291,18 @@ fit.gee.main<- geeglm(status~ sex + ns(age.at.infection,kn=knots.age,Bo = c(0,ag
              ns(pmax(time.after.mv-14/365,0),kn=knots.time.af.mv-14/365,Bo = c(0,time.max-14/365)),id=patid,corstr="exchangeable",family=poisson(link = "log"),data = data.total.main,offset=offset_time)
 end_time <- Sys.time()
 (time_consumed1<-end_time - start_time)
-save(fit.gee.main,file="Results/Final/fit_gee_main.Rdata")
+save(fit.gee.main,file="Results/fit_gee_main.Rdata")
 ```
 
+```{r}
+save(fit.gee.main,file="Results/fit_gee_main.Rdata")
+```
 
 * We fit the Poisson marginal model with cluster (patient), the current age (age.at.infection) and time after MeV
 
 
 ```{r message=FALSE, warning=FALSE, include=FALSE}
-load(file="Results/Final/fit_gee_main.Rdata")
+load(file="Results/fit_gee_main.Rdata")
 time.after.mv<-seq(2/52,10,by=0.01)
 l<-length(time.after.mv)
 mat<-as.matrix(ns(pmax(time.after.mv-14/365,0),kn=knots.time.af.mv-14/365,Bo = c(0,time.max-14/365))-matrix(rep(ns(0,kn=knots.time.af.mv-14/365,Bo = c(0,time.max-14/365)),each=l),nrow=l))
@@ -312,7 +315,7 @@ dat$phi<-pred[,6]
 ```
 
 ```{r message=FALSE, warning=FALSE, include=FALSE}
-load(file="Results/Final/fit_gee_main.Rdata")
+load(file="Results/fit_gee_main.Rdata")
 Time.est<-Time_estimate(fit.gee.main,interval = c(2/52,1.5),knots=knots.time.af.mv,time.max=5)
 ```
 
@@ -363,11 +366,8 @@ p<-ggplot(dat,aes(x=time.after.mv, y=pred)) + geom_line(size=.75,color="#31a354"
         legend.text = element_text(size = 15),
         legend.title = element_blank(),
         legend.key = element_rect(colour = NA),
-<<<<<<< HEAD
+
         strip.text=element_text(face = "bold",size=15))  + coord_cartesian(ylim=c(-4,2),xlim=c(0,6)) 
-=======
-        strip.text=element_text(face = "bold",size=15))  + coord_cartesian(ylim=c(-3,2),xlim=c(0,6)) 
->>>>>>> 2c6a73c79342a29c43976791de63947729a97cdb
 ggsave(file = "Results/Figures/Figure2B.tiff",   
     width = 7, 
     height = 8, dpi=450) 
