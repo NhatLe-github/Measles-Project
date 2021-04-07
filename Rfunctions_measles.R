@@ -16,16 +16,16 @@ library(Epi)
 
 ## Function for data derivations
 data.prepare <- function(data,option = 1,emigration.rate=0,seed = 1234) {
-  # This function aims to clean the patients outcomes
+  # This function aims to clean the data
   # variables: 
   # # data: is the measles data
-  # # option = 0 if  the discharged with presumably worse condition alive
-  # # option = 1 if  the discharged with presumably worse condition dead
+  # # option = 0 if  the discharged with presumably worse condition as alive
+  # # option = 1 if  the discharged with presumably worse condition as dead
   # # option = 2 if  the emigration patient out of the HCMC city
   
   #### ------------------------------ Rule to derive dataset ------------------------------ ####
   # 1. Only the admissions due to infection will be included in the analysis
-  # 2. Impute the birth day for who doesn't have birthday record but have the birth years. 
+  # 2. Impute the birthday for who doesn't have birthday record but have the birth years. 
   #     We immputed it as 30June of the birth years. Who doesn't have birth year 
   #     will be removed from the analysis.
   # 3. We only considered a new admission due to a new episode of infection if the 
@@ -45,8 +45,8 @@ data.prepare <- function(data,option = 1,emigration.rate=0,seed = 1234) {
                                paste(rep("J",23),c("00","01","02","03","04","05","06","07","08","09",10:22),sep = ""),
                                paste(rep("G",10),c("00","01","02","03","04","05","06","07","08","09"),sep = ""))
           
-  ## Rename the id to patid and select the impotrtant variables from the dataset
-  ## Re-order the dataset and create viariable visit and visit last
+  ## Rename the id to patid and select the variables from the dataset
+  ## Re-order the dataset and create variable visit and visit last
   data %<>% rename(patid=iduse) 
   data %<>% dplyr:: select(patid,sex,dob,birthyear,date.admit,date.dis,diagnosis.m3,diagnosis.en,icd.main,icd.m3,
                            outcome,ward,district,province,year)
@@ -57,8 +57,7 @@ data.prepare <- function(data,option = 1,emigration.rate=0,seed = 1234) {
   ## We removed the first records: Two patients were excluded 174644 210565 
   
   data %<>% group_by(patid,date.admit,date.dis) %>% dplyr::mutate(visit.max=max(visit)) %>% ungroup()  
-  data %<>% mutate(select_id=ifelse(visit==visit.max,1,0))  
-  data %<>% filter(select_id==1)  
+  data %<>% filter(visit==visit.max)  
   
   ## Impute all the missing of reasons of discharge --> "unknown".
   data %<>% mutate(outcome = as.character(outcome)) %>% 
@@ -66,55 +65,51 @@ data.prepare <- function(data,option = 1,emigration.rate=0,seed = 1234) {
   
 
   ## Merge all the cases have the same admission but different discharge 
-  ## Select the record with the later hospital discharge (--> re-order the data by date.admit and  date.dis )
+  ## Select the record with the later hospital discharge 
   ## Make sure that for all the patients when we merged two identical admissions, we didn't miss the measles cases i.e. icd.10 code ="B05"
   ## 6 patients 5800   8330  65942 284552 410822 582807 had two hopsital admissions record with the same admission
   
+  data$measles_bi<-ifelse(data$icd.m3=="B05",1,0)
   data %<>% arrange(patid,date.admit,date.dis) 
   data %<>% group_by(patid,date.admit) %>%
             dplyr::mutate(date.dis.max=max(date.dis)) %>%
-            dplyr::mutate(select.id=ifelse(date.dis==date.dis.max,1,0)) %>%
-            ungroup() 
-  
-  data %<>% mutate(icd.m3=ifelse((lag(select.id,1) == 0  &
-                                         lag(patid) == patid) &
-                                        (icd.m3 == "B05" | lag(icd.m3,1) == "B05"),"B05",icd.m3))
-  data$icd.m3[1] <- "J02"
+            dplyr::mutate(icd.m3= ifelse(cumsum(measles_bi)>0,"B05",icd.m3)) %>%
+            ungroup() %>% filter(date.dis==date.dis.max)
 
-  data %<>%  filter(select.id == 1)
-  data[,c("id.date","select.id")] <- NULL
   
   ## Re-defined the outcome presumably.worse. If the patient re-admitted to the hospital after 
   ## being discharged with presumably.worse, the outcome presumably.worse were considered as discharged.
-  ## Take a subset of patients with outcome presumably.worse (dat),
-  ## and then determine the last hospital admission of these patients
   
   dat <- data %>% filter(outcome == "presumably.worse")
   id_worse <- unique(dat$patid)
   data %<>% arrange(patid,date.admit,date.dis) 
   data  <-  visit_provide(data)
-  dat <- data %>% filter(patid %in% id_worse) %>% arrange(patid, visit)
   
   ### If patient re-admited to the hospial after the visit with outcome presumably.worse (i.e. not the last visit) then 
   ### they supposed to be discharged and recovery in the previous admission
-  dat <- data %>% filter(patid %in% id_worse) %>% arrange(patid, visit) %>% 
-                   mutate(presumably_worse = ifelse(outcome == "presumably.worse" & visit == visit.last,"worse.last","discharged"),
-                          index.new = paste(patid,date.admit,sep = ":"))
+  
+  dat <- data %>% filter(patid %in% id_worse) %>% arrange(patid, visit) %>%
+                  mutate(outcome=as.character(outcome)) %>% 
+                  mutate(presumably_worse = ifelse(outcome == "presumably.worse" & visit == visit.last,"worse.last",outcome),
+                         index.new = paste(patid,date.admit,sep = ":")) %>% 
+                  mutate(presumably_worse = ifelse(presumably_worse == "presumably.worse","discharged",presumably_worse))
+
   data %<>% mutate(index.new = paste(patid,date.admit,sep = ":"))
-  ### Merge two datset dat and data.
+  
+  ### Merge two datsets: dat and data.
   data %<>%  left_join(subset(dat,select = c("index.new","presumably_worse")),by="index.new") %>% 
              mutate(outcome = ifelse(outcome == "presumably.worse",presumably_worse,as.character(outcome)))
   data %<>%  mutate(outcome = ifelse(outcome == "worse.last","presumably.worse",as.character(outcome)))
   
   if (option >= 1) {
-    ## we set all the discharged with presumably worse condition dead
+    ## we set all the discharged with presumably worse condition as dead
        data %<>% mutate(outcome=ifelse(outcome == "presumably.worse","dead",outcome))
   }
   
   ## Impute the missing birthday information
   ## and exclude patients without the birth year
   data.imputed.birth <- data %>% filter((is.na(dob)) & (!is.na(birthyear))) %>% 
-                                mutate(dob = as.Date(paste("30June",birthyear,sep = ""),"%d%b%Y",origin = "1970-01-01"))
+                                 mutate(dob = as.Date(paste("30June",birthyear,sep = ""),"%d%b%Y",origin = "1970-01-01"))
   data <- rbind(subset(data,!is.na(data$dob)),data.imputed.birth)
   
   
@@ -127,7 +122,7 @@ data.prepare <- function(data,option = 1,emigration.rate=0,seed = 1234) {
                    time.at.lastfup = pmin(time.at.15birthday,as.Date("2015-12-31",origin = "1970-01-01")),
                    time.at.lastfup = as.Date(ifelse(outcome == "dead",data$date_death,time.at.lastfup),origin = "1970-01-01")) 
   
-  ## Re-assess the time at last follow-up for all individual. Because some one died then the time at last follow-up was the date of death
+  ## If someone died then the time at last follow-up was the date of death
   data %<>% group_by(patid) %>% dplyr::mutate(time.at.lastfup=min(time.at.lastfup)) %>% ungroup()
   data %<>% mutate(time.dis.to.lastfup = as.numeric(difftime(time.at.lastfup,date.dis,units = "days"))) 
   
@@ -163,72 +158,59 @@ data.prepare <- function(data,option = 1,emigration.rate=0,seed = 1234) {
   ##  Merge all the cases discharge and later admit within 2 days. If one of the episode
   ##  was measles then the icd.m3 of merged case would be measles otherwise it would
   ##  be the icd of the latter case (which was not important to this analysis).
-  ##  Compute the time difference between two consecutive admission and
+  ##  Compute the time difference (variable tim_diff) between two consecutive admission and
   ##  Set all the value for the first tim_diff to 10000 (a very large value) for each individual.
-  
-  data %<>% group_by(patid) %>% dplyr::mutate(tim_diff=as.numeric(difftime(date.admit,lag(date.dis,1),unit = "day"))) %>% ungroup() 
-  data %<>% mutate(tim_diff=ifelse(is.na(tim_diff),10000,tim_diff))
-  
-  ## Define a type of pair consecutive admission within 2 days
-  ## For each pair, create variable index_pair to indicate: 
-  ## index_pair = MeV_bf if MeV event occured before the other event
-  ## index_pair = MeV_af if MeV event occured after the other event
-  ## index_pair = MeV_both if both admissions were due to MeV
-  ## index_pair = non_MeV if both admission were not due to MeV
-  ## index_pair = non pairs if not consecutive admission within 2 days
-  
-  data %<>% group_by(patid) %>% dplyr::mutate(index_pair = case_when(
-    tim_diff<2 & (icd.m3 != "B05" & lag(icd.m3,1) == "B05") ~ 'MeV_bf',
-    tim_diff<2 & (icd.m3 == "B05" & lag(icd.m3,1) != "B05") ~ 'MeV_af',
-    tim_diff<2 & (icd.m3 == "B05" & lag(icd.m3,1) == "B05") ~ 'MeV_both',
-    tim_diff<2 & (icd.m3 != "B05" & lag(icd.m3,1) != "B05") ~ "non_MeV",
-                                                TRUE ~ 'non pairs'
-                                              )) %>% ungroup()
 
-  data %<>% arrange(patid,date.admit,date.dis) 
-  data  <-  visit_provide(data)
+  repeat{
+    data %<>% group_by(patid) %>% dplyr::mutate(tim_diff=as.numeric(difftime(date.admit,lag(date.dis,1),unit = "day"))) %>% ungroup()
+    data %<>% mutate(tim_diff=ifelse(is.na(tim_diff),10000,tim_diff))
 
-  
-  ## For all records with the same admissions, 
-  ## index_select select the second record of the pair of the same admission
-  ## visit_select make the pair with the previous visit which has the same admission by set it to the same visit.
-  ## index_select_pair indicate the pair of the same admission
-  
-  data %<>% group_by(patid) %>% 
-    dplyr::mutate(index_select=ifelse(index_pair%in%c("MeV_bf","MeV_af","MeV_both","non_MeV"),1,0),
-                  visit_select=ifelse(index_select==1,visit-1,visit)) %>% ungroup()
-  
-  ## Select the pair which links to the second case
-  data %<>% group_by(patid,visit_select) %>% dplyr::mutate(index_select_pair=max(index_select)) %>% ungroup()
-  
-  ## Re-assess the icd.m3 of the second measles  
-  data %<>% mutate(icd.m3 =ifelse(measles.order=="second","B05*",icd.m3)) 
-  
-  ## Merge information of two admission into one by date.admit = minimum of admision date of two admissions and 
-  ## date.dis = maximum of discharged date of two admissions 
-  ## If one of two admissions was measles then icd.m3 of both admissions will be merged to MeV otherwise it didn't matter
-  ## Since we would chose the second record (index_select==1) of each pair so for the case of MeV_bf and MeV_both the icd was not B05 (i.e. measles) so we set it as MeV
+    data %<>% arrange(patid,date.admit,date.dis)
+    data  <-  visit_provide(data)
 
-  
-  dat.tmp.pair<-data %>% filter(index_select_pair==1)
-  dat.tmp.pair %<>% group_by(patid) %>% dplyr::mutate(date.admit=min(date.admit),
-                                                 date.dis=max(date.dis),
-                                                 icd.m3= ifelse(index_pair%in%c("MeV_bf","MeV_both"),"B05",icd.m3)
-                                                 ) %>% ungroup()
-  ## Re-assess variables measles, and measles order.
-  
-  dat.tmp.pair %<>% filter(index_select==1) %>% mutate(
-                                                  measles=ifelse(icd.m3=="B05","yes","no"),
-                                                  measles.order = ifelse(icd.m3=="B05","first",measles.order))
-  
-  dat.tmp.non.pair<-data%>% filter(index_select_pair==0)
-  dat.tmp.non.pair %<>% mutate(
-                              measles=ifelse(icd.m3=="B05","yes","no"),
-                              measles.order = ifelse(icd.m3=="B05","first",measles.order))
-  
-  data <-rbind(dat.tmp.non.pair,dat.tmp.pair)
-  data %<>% arrange(patid,date.admit,date.dis) 
-  data  <-  visit_provide(data)
+
+    ## For all records with tim_diff<=2,
+    ## Create variables: index_select, visit_select, 
+    ## index_select select the second record of the pair of tim_diff<=2
+    ## visit_select make the pair with the previous visit which has tim_diff<=2 by set it to the same visit.
+   
+
+    data %<>% group_by(patid) %>%
+              dplyr::mutate(index_select=ifelse(tim_diff<=2,1,0),
+                            visit_select=ifelse(index_select==1,visit-1,visit)) %>% ungroup()
+
+    ## Re-set the icd.m3 of the second measles
+    data %<>% mutate(icd.m3 =ifelse(measles.order=="second","B05*",icd.m3),
+                     measles_bi=ifelse(icd.m3=="B05",1,0))
+
+    ## Merge information of two admissions into one by setting date.admit = minimum of admision date of two admissions and
+    ## date.dis = maximum of discharged date of two admissions
+    ## If one of two admissions was measles then icd.m3 of both admissions will be merged to MeV otherwise it didn't matter
+ 
+    data %<>% arrange(patid,date.admit,date.dis) 
+
+    data %<>% group_by(patid,visit_select) %>% dplyr::mutate(date.admit=min(date.admit),
+                                                   date.dis=max(date.dis),
+                                                   measles_group=cumsum(measles_bi),
+                                                   icd.m3= ifelse(measles_group>0,"B05",icd.m3),
+                                                   visit.max=max(visit)
+                                                   ) %>% ungroup()
+    data %<>% filter(visit==visit.max)
+    
+    ## Re-assess variables measles, and measles order.
+    data %<>% mutate(measles=ifelse(icd.m3=="B05","yes","no"),
+                     measles.order = ifelse(icd.m3=="B05","first",measles.order))
+
+    data %<>% arrange(patid,date.admit,date.dis) 
+    data  <-  visit_provide(data)
+    
+    dat_check<-data %<>% group_by(patid) %>% dplyr::mutate(tim_diff=as.numeric(difftime(date.admit,lag(date.dis,1),unit = "day"))) %>% ungroup()
+    dat_check %<>% mutate(tim_diff=ifelse(is.na(tim_diff),10000,tim_diff))
+    (flag<-sum(dat_check$tim_diff<=2))
+    if(flag==0){
+      break
+    }
+  }
   
   ## Classify the type of infections. 
   ## For the second measles admission will be considered as measles complicated.
@@ -280,10 +262,10 @@ data.prepare <- function(data,option = 1,emigration.rate=0,seed = 1234) {
     ### Identify the last year which visit the hospital. Because in the later year patients may emigrate out of the city. 
     dat <- data.after %>%  arrange(patid,date.admit)
     dat  <-  visit_provide(dat)
-    # dat.sum <- dat %>% group_by(patid) %>% dplyr::summarise(visit.last = max(visit),last.year.ev = max(year),date.dis.last=as.Date(max(date.dis),origin = "1970-01-01"),.groups="keep") %>% ungroup() 
-    # dat <- merge(dat,dat.sum,by = "patid",all.x=T)
+    dat %<>% mutate(year=year(date.admit))
     
-    dat <- dat %>% group_by(patid) %>% dplyr::mutate(last.year.ev = max(year),date.dis.last=as.Date(max(date.dis),origin = "1970-01-01")) %>% ungroup() 
+    dat <- dat %>% group_by(patid) %>%
+                   dplyr::mutate(last.year.ev = max(year),date.dis.last=as.Date(max(date.dis),origin = "1970-01-01")) %>% ungroup() 
 
     
     dat.tmp <- data.frame()
@@ -308,15 +290,9 @@ data.prepare <- function(data,option = 1,emigration.rate=0,seed = 1234) {
                           time.at.lastfup=as.Date(pmin(time.at.lastfup,censored.time),origin = "1970-01-01"),
                           time.dis.to.lastfup=difftime(time.at.lastfup,date.dis.measles,units = "days")
                         ) 
-    dat.tmp[,c("random.time.from.date.dis.last.to.emigration","date.at.random.emigration")]<-NULL
-    data.before %<>% mutate(
-                              visit.last = NA,
-                              last.year.ev = NA,
-                              date.dis.last =NA,
-                              censored.time = NA,
-                              censored = NA
-                              
-                            ) 
+    dat.tmp[,c("random.time.from.date.dis.last.to.emigration","date.at.random.emigration","visit.last",
+               "last.year.ev","date.dis.last","censored.time","censored")]<-NULL
+    
     data <- rbind(data.before,dat.tmp) %>% arrange(patid,date.admit,date.dis)
   }
   data[,c("measles.order","lag.patid","lag.admit","lag.icd.m3","date.dis.last","censored.time")]<-NULL
@@ -347,6 +323,7 @@ data.transformed <- function(data,option=0,emigration.rate=0,seed=1234) {
   ####------------------------------Transformation for  data after measles event------------------------------####
   years.before   <- 2
   time.period    <- 365*years.before
+  
   ### Include only the admission occured 2 year before measles admission
   ### The duration from measles infection to the other admission
   dat.tmp.before <- data %>% filter(period %in% c("before","measles")) %>%
@@ -357,62 +334,67 @@ data.transformed <- function(data,option=0,emigration.rate=0,seed=1234) {
   ## test if time to measles have na value
   ## sum(is.na(dat.tmp.before$time.dis.to.ad.measles))
 
-  ## Create dataset of 2 year before MeV event
-  ## Impute the follow-up time between the last event to MeV event
-  ## flag.index.impute = 1 i.e. MeV event with a previous event
-  ## flag.index.impute = 2 i.e. MeV event without a previous event
-  ## flag.index.impute = 3 i.e. other type of event 
+  ## Select only record ouccured within 2 year before MeV event
+  ## Compute the time to follow-up for each event within 2 years before MeV.
+  ## Variable flag.index.impute determine type of event occured within 2 year before MeV
+  ## flag.index.impute = 1 i.e. MeV event with a previous non MeV event
+  ## flag.index.impute = 2 i.e. MeV event without any previous non MeV event
+  ## flag.index.impute = 3 i.e. non MeV events occured before MeV event
   
-  dat.tmp.before.years.before <- dat.tmp.before %>% filter(time.ad.to.ad.measles<= time.period) %>% 
-    arrange(patid,date.admit,date.dis) %>% group_by(patid) %>% 
+  dat.tmp.before.2years.before <- dat.tmp.before %>%
+    filter(time.ad.to.ad.measles<= time.period) %>% 
+    arrange(patid,date.admit,date.dis) %>% 
+    group_by(patid) %>% 
     dplyr::mutate(status = ifelse(period == "measles",0,1),
-                  flag.index.impute = ifelse(period=="measles",ifelse((!is.na(lag(patid,1))),1,2),3))  %>% ungroup()
+                  flag.index.impute = ifelse(period=="measles",ifelse((!is.na(lag(patid,1))),1,2),3)) %>% ungroup()
   
-  ## For flag.index.impute = 2 and = 3, we define the obs.time = the period since 2 year before MeV to the current event
-  dat.tmp.before.years.before_2_3 <- dat.tmp.before.years.before %>% 
+  ## We set 2 year before MeV as the time origin,
+  ## Variable obs.time = the time the current event occured since the time origin.
+  ## For flag.index.impute = 2, obs.time was the whole time.period or age.at.measles.d if children under 2 years old
+  ## For flag.index.impute = 3, obs.time was the (time.period - abs(time.ad.measles.to.ad) or age.at.admit.d if children under 2 years old
+  
+  dat.tmp.before.2years.before_2_3 <- dat.tmp.before.2years.before %>% 
     filter(flag.index.impute %in%c(2,3)) %>% 
     mutate(obs.time = ifelse(flag.index.impute==2,ifelse(age.at.measles.d >= time.period,time.period,age.at.measles.d),
                              ifelse(age.at.measles.d >= time.period,pmax(time.period - abs(time.ad.measles.to.ad),0),
                                     age.at.admit.d)))
   
-  ## during the time.period = 2 years
-  ## For the first event of flag.index.impute = 3 or flag.index.impute = 2, the time start is 0.
-  ## For subsequent event with flag.index.impute = 3, the time start is the discharge time of the previous event, i.e lag(obs.time,1)+lag(hospialization,1)
-  ## And the time stop of the current event is the obs.time
+  ## For the first event of flag.index.impute = 3 or flag.index.impute = 2, the time start of the follow-up was 0.
+  ## For subsequent event with flag.index.impute = 3, the time start of the follow-up was the discharge time of the previous event, i.e lag(obs.time,1)+lag(hospialization,1)
+  ## And the time stop of time start of the follow-up of the current event was the obs.time
   
-  dat.tmp.before.years.before_2_3 %<>% 
+  dat.tmp.before.2years.before_2_3 %<>% 
     arrange(patid,date.admit,date.dis) %>% group_by(patid) %>% 
     dplyr::mutate(obs.time = ifelse(date.admit == dob & age.at.measles.d < time.period,1,obs.time),# for special cases the child were born and admitted to hospital
                   time.start = ifelse(!(is.na(lag(patid,1))),
                                       lag(obs.time,1)+lag(hospitalization,1),0)
                   ) %>% ungroup()
   
-
-  dat.tmp.before.years.before_2_3 %<>% mutate(time.stop  = obs.time,
-                                              time.stop  = ifelse(time.stop == 0,time.start+1,time.stop)) %>% 
-                                       filter(time.stop > 0)
+  ## The case of time.stop=0 is the case the patient have event exactly on 2 year before MeV
+  dat.tmp.before.2years.before_2_3 %<>% mutate(time.stop  = obs.time,
+                                               time.stop  = ifelse(time.stop == 0,time.start+1,time.stop))
   
   ## For flag.index.impute ==1, the MeV event occured after a previous event with flag.index.impute ==3,
-  ## That was also the last event non MeV occured  befored MeV during the 2 years period.
-  ## The time start was the time stop of the previous event + hopitalisation,
-  ## The time stop was the time period for children above 2 years ole and = age.at measles for children under 2 years old.
-  
-  dat.tmp.before.years.before_2_3<-visit_provide(dat.tmp.before.years.before_2_3)
-  dat.tmp.before.years.before_1 <- dat.tmp.before.years.before_2_3 %>% filter(visit==visit.last & flag.index.impute ==3) %>% 
+  ## which was the last event non MeV occured  befored MeV.
+  ## The time start of the follow-up was the time stop of the previous event + hopitalisation,
+  ## The time stop was the whole time period = 2 years or = age.at measles for children under 2 years old.
+  dat.tmp.before.2years.before_2_3 %<>% arrange(patid,date.admit) 
+  dat.tmp.before.2years.before_2_3  <- visit_provide(dat.tmp.before.2years.before_2_3)
+  dat.tmp.before.2years.before_1 <- dat.tmp.before.2years.before_2_3 %>% filter(visit==visit.last & flag.index.impute ==3) %>% 
                                       mutate(time.start = time.stop + hospitalization,
                                              time.stop = ifelse(age.at.measles.d >= time.period,time.period,age.at.measles.d),
                                              status = 0) %>% 
                                       arrange(patid,date.admit,date.dis)
 
-  ### Merge two dataset dat.tmp.before.years.before_1 and dat.tmp.before.years.before_2_3
-  dat.tmp.before.years.before <- rbind(dat.tmp.before.years.before_2_3,dat.tmp.before.years.before_1)
-  dat.tmp.before.years.before[,c("measles","period","icd.m3")]<-NULL
-  dat.tmp.before.years.before %<>% filter(time.stop > time.start) %>% arrange(patid,time.start)
+  ### Merge two dataset dat.tmp.before.2years.before_1 and dat.tmp.before.2years.before_2_3
+  dat.tmp.before.2years.before <- rbind(dat.tmp.before.2years.before_2_3,dat.tmp.before.2years.before_1)
+  dat.tmp.before.2years.before[,c("measles","period","icd.m3")]<-NULL
+  dat.tmp.before.2years.before %<>% filter(time.stop > time.start) %>% arrange(patid,time.start)
   
-  (n10 <- length(unique(dat.tmp.before.years.before$patid)))
+  (n10 <- length(unique(dat.tmp.before.2years.before$patid)))
   
   ## Transforming the dataset into daily interval observations
-  dat.tmp.before.split <- survSplit(Surv(time.start,time.stop, status)~.,dat.tmp.before.years.before,cut=c(seq(0,time.period,by=1)),episode ="days")
+  dat.tmp.before.split <- survSplit(Surv(time.start,time.stop, status)~.,dat.tmp.before.2years.before,cut=c(seq(0,time.period,by=1)),episode ="days")
   
   dat.tmp.before.split$days <- dat.tmp.before.split$days - 1
   dat.tmp.before.split$age.at.infection <- ifelse(dat.tmp.before.split$age.at.measles.d >= time.period,
@@ -427,86 +409,114 @@ data.transformed <- function(data,option=0,emigration.rate=0,seed=1234) {
 
   ## We remove the washout period of 2 weeks=14 days.
   removed <- TRUE
-  ## collapse two consecutive episode if it happened within 2 weeks
+  
+  ## Collapse two consecutive episode if it happened within 2 weeks
   if(removed == TRUE) {
-    # update the new discharge date of measles
-    data.tmp.after %<>% mutate(date.last14.measles = date.admit.measles + 14) %>%
-      arrange(patid,date.admit,date.dis) %>% group_by(patid) %>%
-      dplyr::mutate(selected.removed = ifelse(!is.na(lag(patid,1)) & (date.admit<= date.last14.measles),1,0),
-                    date.dis.measles.updated = pmax(date.last14.measles,date.dis.measles)) %>% ungroup() %>%
-      arrange(patid,desc(date.admit))
+    
+    ## Update the new discharge date of measles (add up 14 days after MeV)
+    ## Variable selected.removed indicated which records need to remove since it occured within 2 weeks. 
+    data.tmp.after %<>% 
+      mutate(date.last14.measles = as.Date(date.admit.measles+14,origin = "1970-01-01")) %>%
+      arrange(patid,date.admit,date.dis) 
 
-    ### Since there is no 3 admission within 2 week since measles admission, so we defined the updated date.dis.measles
-    ### Remove all cases occured within 2 weeks
-    data.tmp.after %<>% mutate(date.dis.measles = ifelse(period == "measles" & patid == lag(patid,1) & lag(selected.removed) == 1,
-                                                         pmax(lag(date.dis,1),date.dis.measles.updated),date.dis.measles.updated)) %>%
-      filter(selected.removed==0) %>%
+    ## If there were an event occurred within two weeks but the discharge beyond the discharged date of MeV +14 day then the
+    ## the new discharge date of measles would be updated as the maximum time of discharge.
+    ## We splitted the dataset into subsets which event occured before the date.dis.measles.updated and after.
+    ## For the data.tmp.after.within2wks, we reset the time discharge for MeV.
+
+    
+    data.tmp.after.after2wks <-  data.tmp.after %>% filter(date.admit>date.last14.measles) 
+    data.tmp.after.within2wks <- data.tmp.after %>% filter(date.admit<=date.last14.measles) %>% 
       arrange(patid,date.admit,date.dis) %>%
-      mutate(date.dis.measles = as.Date(date.dis.measles,origin = "1970-01-01"))
-    data.tmp.after$date.dis.measles[1] <- as.Date(data.tmp.after$date.admit.measles[1]+14,origin = "1970-01-01")
+      group_by(patid) %>%
+      dplyr::mutate(date.dis.measles.updated = pmax(date.last14.measles,date.dis)) %>% ungroup()
+    
+    data.tmp.after.within2wks %<>% mutate(date.dis=as.Date(ifelse(period=="measles",date.dis.measles.updated,date.dis),origin = "1970-01-01"))
+    
+    data.tmp.after.within2wks %<>% 
+      group_by(patid) %>% 
+      dplyr::mutate(date.admit=min(date.admit),
+             date.dis= max(date.dis)) %>% filter(period=="measles") %>% ungroup()
+    data.tmp.after.within2wks[,"date.dis.measles.updated"]<-NULL
+    data.tmp.after<-rbind(data.tmp.after.within2wks,data.tmp.after.after2wks)
+    data.tmp.after %<>%  arrange(patid,date.admit)
 
-    data.tmp <- data.tmp.after %>% filter(period == "measles")
+    ### update the new date.dis.measles and the new time at last follow-up for the data after adding  14 days
+    data.tmp <- data.tmp.after %>% filter(period == "measles") %>% 
+      mutate(date.dis.measles=date.dis)
+    
     data.tmp.after$date.dis.measles <- NULL
     data.tmp.after <- left_join(data.tmp.after,subset(data.tmp,select = c("patid","date.dis.measles")),by = "patid")
-    ### update the new time at last follow-up for the data after adding  14 days
     data.tmp.after %<>% mutate(time.at.lastfup = as.Date(pmax(time.at.lastfup,date.dis.measles),origin = "1970-01-01"))
     
     
   }
 
-  ### Define the flag.index.impute variable is the indication of type of event
-  ### flag.index.impute =1 if MeV without subsequent other event
-  ### flag.index.impute =2 if MeV with subsequent other event
-  ### flag.index.impute =3 if  other event before the last non-MeV event
-  ### flag.index.impute =4 if  the last non-MeV event
+  ## Classify type of event occured after MeV.
+  ## Variable  flag.index.impute variable is the indication of type of the events  
+  ## Here we use the forward direction of time
+  ## flag.index.impute =1 if MeV without subsequent non-MeV event
+  ## flag.index.impute =2 if MeV with subsequent non-MeV event
+  ## flag.index.impute =3 if  non-MeV event occured before the last non-MeV event
+  ## flag.index.impute =4 if  the last non-MeV event
   
-  data.tmp.after %<>% arrange(patid,desc(date.admit)) 
+  data.tmp.after %<>% arrange(patid,date.admit) 
   data.tmp.after <- visit_provide(data.tmp.after)
   
   data.tmp.after %<>%   group_by(patid) %>%
                         dplyr::mutate(flag.index.impute = ifelse(period == "after",
                                                                  ifelse(visit==visit.last,4,3),
-                                                                 ifelse(is.na(lag(patid,1)),1,2)
+                                                                 ifelse(visit==visit.last,1,2)
                                                                  )
                                       ) %>% ungroup()
   
-  data.tmp.after %<>% arrange(patid,date.admit,date.dis)
+  data.tmp.after %<>% arrange(patid,date.admit)
 
 
 
-  ### Compute obs.time.since.MeV and set obs.time.since.MeV==-14 for measles cases
-  ### Compute time to follow-up for each patient for the group of non MeV event or MeV event with subsequent other events
-  ### For all the case with flag.index.impute = 3 and 4, the time start of the event is the time stop of the previous event + hospitalization.
-  ### For all the case with flag.index.impute = 1 and 2, the time start of the event is 0.
+  ### Compute obs.time.since.MeV. We set date of MeV discharge time as the time origin and 
+  ### in the forward direction of time the lastest event is the event we censored at last follow-up.
+ 
   data.tmp.after %<>%
     arrange(patid,date.admit,date.dis) %>%
-    mutate(#obs.time.since.MeV = ifelse(period == "after",as.numeric(difftime(date.admit,date.dis.measles,units="days")),0),# the duration from measles infection to the other admission
+    mutate(
       obs.time.since.MeV = as.numeric(difftime(date.admit,date.dis.measles,units="days")),     
       time.dis.MeV.to.lastfup = as.numeric(difftime(time.at.lastfup,date.dis.measles,units="days")),
-           hospitalization.measles = as.numeric(difftime(date.dis.measles,date.admit.measles,units="days")))
+      hospitalization.measles = as.numeric(difftime(date.dis.measles,date.admit.measles,units="days")))
+  
   (n10<-length(unique(data.tmp.after.tmp$patid)))
+ 
+  
+  ## We set the time origin is the measles discharge
+  ## The time start of the follow-up of the event with flag.index.impute = 1 and 2 is 0 
+  ## The time start of the follow-up of the event with flag.index.impute = 3 and 4 is obs.time.since.MeV +hospitalization
 
-  data.tmp.after %<>%  arrange(patid,date.admit,date.dis) %>%
-    mutate(lag.obs.time.since.MeV = lag(obs.time.since.MeV,1),
-           time.start = ifelse(flag.index.impute%in%c(3,4),obs.time.since.MeV+hospitalization,0))
+  data.tmp.after %<>%  
+    arrange(patid,date.admit,date.dis) %>%
+    mutate(time.start = ifelse(flag.index.impute%in%c(3,4),obs.time.since.MeV+hospitalization,0))
 
   (n10<-length(unique(data.tmp.after$patid)))
 
-  ## The time.stop of flag.index.impute = 1 is the last follow-up time
-  ## The time.stop of flag.index.impute = 2 and 3 is the time of the event of the next event
+  ## The time.stop of the next event after the event with flag.index.impute = 1  and 4 is the last follow-up time (censored event)
+  ## The time.stop of  the next event after the event with flag.index.impute = 2 and 3 is the time that the next event occured.
 
-  data.tmp.after %<>% mutate(time.stop   = ifelse(flag.index.impute %in%c(1,4) ,time.dis.MeV.to.lastfup,lead(obs.time.since.MeV,1)),
-                             status   = ifelse(flag.index.impute %in% c(1,4),0,1))
+  data.tmp.after %<>% 
+    group_by(patid) %>% 
+    dplyr::mutate(time.stop   = ifelse(flag.index.impute %in%c(1,4) ,time.dis.MeV.to.lastfup,lead(obs.time.since.MeV,1)),
+           status   = ifelse(flag.index.impute %in% c(1,4),0,1)) %>% ungroup()
   (n10<-length(unique(data.tmp.after.tmp$patid)))
+  
+  ## Remove all the case without event due to dead  to avoid bias because if this perison were not death. He would be more frequent to admitted to hospital 
+  ## Remove all the case whch time,start=time.stop, i.e., no follow-up at that event
+  ## Remove all the case without event due to migration out of the city because there were no follow-up.
+
+  data.tmp.after  %<>%  arrange(patid,date.admit) %>% filter(outcome!="dead" & time.start< time.stop)
 
   
-  
-  ### Remove all the case without event due to dead or migration out of the city i.e. no follow-up.
-  data.tmp.after  %<>%  arrange(patid,date.admit) %>% filter(time.start < time.stop)
   data.tmp.after  <- subset(data.tmp.after, select = c("patid","period","status","time.start","time.stop","sex","district","age.at.measles.d","hospitalization.measles","date.dis.measles","infection.type","hospitalization"))
   (n10 <- length(unique(data.tmp.after$patid)))
   data.tmp.after.split <- survSplit(Surv(time.start,time.stop, status)~.,data.tmp.after,cut = c(seq(0,max(data.tmp.after$time.stop),by = 1)),episode ="days")
-  data.tmp.after.split %<>% mutate(days=days-1,# day 0 is the measle day and day 1 ? the next day after measles event.
+  data.tmp.after.split %<>% mutate(days=days-1,# day 0 is the measles day and day 1 is the next day after measles event.
                                    time.after.mv = days/365 + hospitalization.measles/365,
                                    age.at.measles.after.hosp=(age.at.measles.d + hospitalization.measles)/365) %>% 
                                    arrange(patid,time.after.mv)
@@ -515,7 +525,10 @@ data.transformed <- function(data,option=0,emigration.rate=0,seed=1234) {
   dat.before <- subset(dat.tmp.before.split,select = c("patid","status","age.at.infection","sex","district","age.at.measles.d","infection.type","hospitalization","days"))
   dat.before %<>% mutate(weeks = cut(days,breaks = seq(0,max(days) + 7,by = 7)),
                          time=1)
-  dat.before <- dat.before %>% group_by(patid,sex,district,age.at.measles.d,infection.type,hospitalization,weeks) %>% dplyr::summarise(status = sum(status),age.at.infection = mean(age.at.infection),time.interval = sum(time),.groups="keep") %>% ungroup() 
+  dat.before <- dat.before %>% 
+    group_by(patid,sex,district,age.at.measles.d,infection.type,hospitalization,weeks) %>%
+    dplyr::summarise(status = sum(status),age.at.infection = mean(age.at.infection),time.interval = sum(time),.groups="keep") %>%
+    ungroup() 
   dat.before %<>% mutate(time.after.mv = -1,period="before") %>% as.data.frame()
 
 
@@ -525,8 +538,12 @@ data.transformed <- function(data,option=0,emigration.rate=0,seed=1234) {
                         weeks = cut(days,breaks=seq(0,max(days)+7,by=7)),
                         time = 1)
   
-  dat.after <- dat.after %>% group_by(patid,sex,district,age.at.measles.d,infection.type,hospitalization,weeks) %>% dplyr::summarise(status = sum(status),age.at.infection = mean(age.at.infection),time.after.mv = mean(time.after.mv),time.interval = sum(time),.groups="keep")  %>%
-    ungroup() %>% mutate(period="after")  %>% as.data.frame()
+  dat.after <- dat.after %>%
+    group_by(patid,sex,district,age.at.measles.d,infection.type,hospitalization,weeks) %>% 
+    dplyr::summarise(status = sum(status),age.at.infection = mean(age.at.infection),time.after.mv = mean(time.after.mv),time.interval = sum(time),.groups="keep")  %>%
+    ungroup() %>%
+    mutate(period="after")  %>%
+    as.data.frame()
 
   data.total <- rbind(dat.before,dat.after)
   
@@ -568,6 +585,7 @@ funct<-function(x,knots,coef,time.max=9.8){
   val<-c%*%coef
   return(val[1])
 }
+
 Time_estimate<-function(fit,interval,knots,time.max){
   ## This function find the zeros of the equation "log incidence rate ratio of hospital admission after vs. 2yrs before MeV =0 "
   ## fit is the fitted object from the Poisson mixed effect model
@@ -1050,8 +1068,10 @@ pred.gee.diff<-function(obj,newdata){
 
 visit_provide<-function(data){
   data%<>% mutate(flag=1)
-  data %<>% mutate(flag=1) %>% group_by(patid) %>% 
-    dplyr::mutate(visit=cumsum(flag),visit.last = max(visit)) %>% ungroup() 
+  data %<>% mutate(flag=1) %>% 
+    group_by(patid) %>% 
+    dplyr::mutate(visit=cumsum(flag),visit.last = max(visit)) %>%
+    ungroup() 
   return(data)
 }
 
