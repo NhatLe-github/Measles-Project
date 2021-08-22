@@ -1,0 +1,1569 @@
+---
+title: "Extra analysis for reviewer of BMC_ID_2"
+author: "Nhat Le"
+date: "7/16/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = TRUE,
+	message = FALSE,
+	warning = FALSE
+)
+library(tidyverse)
+library(magrittr)
+library(gdpm)
+library(fpp2)
+library(surveillance)
+library(ggfan)
+```
+
+We aim to assess the assumption that the level of exposure to infectious disease is constant with respect to calendar time in the short period of ten year (2005-2015) in HCMC. We use monthly surveillance data aggregated by province by the Vietnamese General Department of Preventive Medicine (GDPM). Data were available for 19 common diseases: amoebiasis,chickenpox,dengue,diarrhea,diphteria,dysenteria,encephalitis,hepatitis,hfmd,measles,mumps,pertussis,polio,rabies,rubella,shigella,ssuis,tetanus,typhoid. 
+
+
+## Incidence of measles and other infectious diseases in HCMC from 2005-2015
+
+
+
+```{r eval=FALSE, include=FALSE}
+diseases_names<-diseases$disease[!diseases$disease%in%c("anthrax","cholera","ili","leptospiriosis","malaria", "h5n1","meningitis","plague","nntetanus","adenovirus")]
+dat.year<-expand.grid(month=1:12,year=2005:2015) %>% mutate(month.y=paste(year,month,sep="."))
+dat_total<-data.frame()
+for(i in diseases_names){
+  dat_id<-getid_(i,from="2005-01-01",to="2015-12-31") %>% filter(province=="Ho Chi Minh") %>% mutate(month=as.numeric(factor(month)))  %>% mutate(month.y=paste(year,month,sep="."))
+  dat_total_tmp<-merge(dat.year,dat_id[,c(4,6)],all.x = T,by="month.y")
+  dat_total_tmp$cases<-dat_total_tmp[,4]
+  dat_total_tmp$type<-i
+  dat_total_tmp[,4]<-NULL
+  dat_total<-rbind(dat_total,dat_total_tmp)
+}
+
+dat_total %<>% arrange(year,month) 
+
+dat_total_incidence_w <-dat_total%<>% spread(key="type",cases) %>% arrange(year,month)
+dat_total_incidence_w<-dat_total_incidence_w[,-c(2:3)]
+dat_final<-ts(dat_total_incidence_w,start=c(2005, 1), frequency = 12)
+save(dat_final,file="dat_final.Rdata")
+```
+
+
+```{r echo=FALSE, fig.height=9, fig.width=10}
+load(file="dat_final.Rdata")
+dat<-dat_final[,c("rabies","hfmd","dengue","diphteria","encephalitis","tetanus", "hepatitis","ssuis","measles")]
+dat %>% autoplot(facet=T)+
+  ggtitle("") +
+  xlab("Year") +
+  ylab("Number of cases in HCMC\n 2005-2015")+ theme_bw() +
+  theme(panel.grid.minor = element_blank(),axis.title.x = element_text(face="bold", colour="black", size=15, margin = margin(t = 20,r = 20,b =20, l = 20)),
+        axis.title.y = element_text(face="bold", colour="black", size=15, margin = margin(t = 20,r = 20,b = 20, l = 20)),
+        axis.text.y = element_text( colour="black", size=10),
+        axis.text.x = element_text( colour="black", size=10),
+        axis.ticks.x=element_blank(),
+        legend.text = element_text(size = 10),
+        legend.title = element_blank(),
+        legend.key = element_rect(colour = NA),
+        strip.text=element_text(face = "bold",size=10)) +xlab("Year")+scale_y_continuous(trans='sqrt')
+```
+
+
+
+
+```{r echo=FALSE,fig.height=9, fig.width=10}
+dat<-dat_final[,c("chickenpox", "pertussis","polio", "mumps","rubella","measles")]
+dat %>% autoplot(facet=T)+
+  ggtitle("") +
+  xlab("Year") +
+  ylab("Number of cases in HCMC\n 2005-2017")+ theme_bw() +
+  theme(panel.grid.minor = element_blank(),axis.title.x = element_text(face="bold", colour="black", size=15, margin = margin(t = 20,r = 20,b =20, l = 20)),
+        axis.title.y = element_text(face="bold", colour="black", size=15, margin = margin(t = 20,r = 20,b = 20, l = 20)),
+        axis.text.y = element_text( colour="black", size=10),
+        axis.text.x = element_text( colour="black", size=10),
+        axis.ticks.x=element_blank(),
+        legend.text = element_text(size = 10),
+        legend.title = element_blank(),
+        legend.key = element_rect(colour = NA),
+        strip.text=element_text(face = "bold",size=10)) +xlab("Year")+scale_y_continuous(trans='sqrt')
+```
+
+
+```{r echo=FALSE,fig.height=9, fig.width=10}
+dat<-dat_final[,c("amoebiasis","dysenteria","diarrhea","typhoid","shigella","measles")]
+dat %>% autoplot(facet=T)+
+  ggtitle("") +
+  xlab("Year") +
+  ylab("Number of cases in HCMC\n 2005-2015")+ theme_bw() +
+  theme(panel.grid.minor = element_blank(),axis.title.x = element_text(face="bold", colour="black", size=15, margin = margin(t = 20,r = 20,b =20, l = 20)),
+        axis.title.y = element_text(face="bold", colour="black", size=15, margin = margin(t = 20,r = 20,b = 20, l = 20)),
+        axis.text.y = element_text( colour="black", size=10),
+        axis.text.x = element_text( colour="black", size=10),
+        axis.ticks.x=element_blank(),
+        legend.text = element_text(size = 10),
+        legend.title = element_blank(),
+        legend.key = element_rect(colour = NA),
+        strip.text=element_text(face = "bold",size=10)) +xlab("Year")+scale_y_continuous(trans='sqrt')
+```
+
+
+In this figure, we can observed a small outbreak of pertusis and polio occrured right after the measles outbreak. Which suggests a strong indication of population-level immunne-amesia. 
+
+
+
+In order to assess the assumption, we will estimate the slope of the endemic component of  the time series per infectious dieases based on endemic-epidemic univariate time-series model. For disease with avialable vaccination, we wil model the slope of the epidemic component of  the time series as well. This corresponds to the change in the reproduction of the disease due to the chnage in the proportion of vaccinated population.
+
+## Model fitting (hhh4 model)
+
+
+```{r include=FALSE}
+library(gdpm)
+diseases_names<-diseases$disease[!diseases$disease%in%c("anthrax","cholera","ili", "h5n1","meningitis","plague","nntetanus","adenovirus","leptospiriosis","malaria")]
+
+```
+
+### Disease with decline trend with respect to calendar time
+
+#### Amoebiasis
+
+```{r echo=FALSE}
+library(scales)
+i<-diseases_names[1]
+dat_id<-getid_(i,from="2005-01-01",to="2015-12-31") %>% filter(province=="Ho Chi Minh") %>% mutate(month=as.numeric(factor(month)))  %>% mutate(month.y=paste(year,month,sep=".")) 
+  if(i=="rubella"){
+      year.start<-2011
+      month.start<-1
+      dat_id %<>% filter(year>=2011)
+  }else{
+      year.start<-dat_id$year[1]
+      month.start<-dat_id$month[1]
+  }
+
+  dat_id<-dat_id[,4]
+  dat_id_incidence<-ts(dat_id,start=c(year.start, month.start), frequency = 12)
+  
+z.sts <- as(dat_id_incidence, "sts")
+ plot(z.sts)
+( f_S1 <- addSeason2formula(f = ~ 1+t, S = 1, period = 12))
+fit_id_1 <- hhh4(z.sts, control = list(ar = list(f = ~ 1),end = list(f = f_S1),family = "NegBin1"))
+
+( f_S2 <- addSeason2formula(f = ~ 1+t, S = 3, period = 12))
+fit_id_2 <- hhh4(z.sts, control = list(ar = list(f = ~ 1),end = list(f = f_S2),family = "NegBin1"))
+AIC(fit_id_1,fit_id_2)
+
+plot(fit_id_1,type="season")
+fitSim <- simulate(fit_id_1,nsim = 500, seed = 1,simplify = T)
+ylab_id<-paste("Number of",i,"[cases]")
+### using simulation function to plot the CI confidence interval for the model.
+plot(fitSim, "fan",fan.args=list(start=1), means.args = list(), key.args = list(), xaxis=list(epochsAsDate=TRUE,
+    xaxis.tickFreq=list("%m"=atChange, "%Y"=atChange),
+    xaxis.labelFreq=list("%Y"=atMedian), xaxis.labelFormat="%Y"),ylab= ylab_id,legend.opts=NULL)
+```
+
+```{r echo=FALSE}
+hhh4fit<-fit_id_1
+tab<-cbind(Estimate=summary(hhh4fit)$fixef[,1],confint(hhh4fit))
+knitr::kable(tab)
+```
+
+* There was a decline trend of the cases of amoebiasis with incidence rate ratio (IRR) =`r paste(round(exp(tab["end.t",1]),3)," 95%CI (",round(exp(tab["end.t",2]),3),",",round(exp(tab["end.t",3]),3),")",sep="")` per year.
+
+```{r echo=FALSE, fig.height=5, fig.width=10}
+nsim <- 1000
+dat.raw<-data.frame(time=as.vector(time(dat_id_incidence)),
+                                 observed= dat_id)
+sims <- lapply(seq_len(nsim), function(i) {
+  data.frame(time = as.vector(time(dat_id_incidence)),
+             y = rnbinom(length(dat_id), mu = fitted(hhh4fit),
+                         size = exp(hhh4fit$coefficients[["-log(overdisp)"]])),
+             iteration = i)
+})
+
+tmp <- do.call(rbind, sims)
+
+p <- ggplot(tmp, aes(x=time,y=y)) + geom_fan() +scale_fill_gradient(low="red", high="yellow")+
+  theme_bw() + ylab(ylab_id)+geom_point(data=dat.raw,aes(x=time,y=observed))+geom_line(data=dat.raw,aes(x=time,y=observed))+  theme_bw() +
+  theme(panel.grid.minor = element_blank(),axis.title.x = element_text(face="bold", colour="black", size=15, margin = margin(t = 20,r = 20,b =20, l = 20)),
+        axis.title.y = element_text(face="bold", colour="black", size=15, margin = margin(t = 20,r = 20,b = 20, l = 20)),
+        axis.text.y = element_text( colour="black", size=15),
+        axis.text.x = element_text( colour="black", size=15),
+        axis.ticks.x=element_blank(),
+        legend.text = element_text(size = 15),
+        legend.title = element_blank(),
+        legend.key = element_rect(colour = NA),
+        strip.text=element_text(face = "bold",size=15)) +xlab("Year")
+print(p)
+```
+
+
+
+
+
+
+
+#### Diphteria
+
+```{r include=FALSE}
+i<-diseases_names[5]
+
+dat_id<-getid_(i,from="2005-01-01",to="2015-12-31") %>% filter(province=="Ho Chi Minh") %>% mutate(month=as.numeric(factor(month)))  %>% mutate(month.y=paste(year,month,sep=".")) 
+
+if(i=="rubella"){
+      year.start<-2011
+      month.start<-1
+      dat_id %<>% filter(year>=2011)
+  }else{
+      year.start<-dat_id$year[1]
+      month.start<-dat_id$month[1]
+}
+
+dat_id<-dat_id[,4]
+dat_id_incidence<-ts(dat_id,start=c(year.start, month.start), frequency = 12)
+  
+z.sts <- as(dat_id_incidence, "sts")
+ plot(z.sts)
+( f_S1 <- addSeason2formula(f = ~ 1+t, S = 1, period = 12))
+fit_id_1 <- hhh4(z.sts, control = list(ar = list(f = ~ t),end = list(f = f_S1),family = "NegBin1"))
+
+( f_S2 <- addSeason2formula(f = ~ 1+t, S = 1, period = 24))
+fit_id_2 <- hhh4(z.sts, control = list(ar = list(f = ~ t),end = list(f = f_S2),family = "NegBin1"))
+AIC(fit_id_1,fit_id_2)
+
+plot(fit_id_2,type="season")
+fitSim <- simulate(fit_id_2,nsim = 500, seed = 1)
+ylab_id<-paste("Number of",i,"[cases]")
+### using simulation function to plot the CI confidence interval for the model.
+plot(fitSim, "fan", means.args = list(), key.args = list(),ylab= ylab_id)
+```
+
+
+
+```{r echo=FALSE}
+hhh4fit<-fit_id_2
+tab<-cbind(Estimate=summary(hhh4fit)$fixef[,1],confint(hhh4fit))
+knitr::kable(tab)
+```
+
+* There was a decline trend of the cases of diphteria with incidence rate ratio (IRR) =`r paste(round(exp(tab["end.t",1]),3)," 95%CI (",round(exp(tab["end.t",2]),3),",",round(exp(tab["end.t",3]),3),")",sep="")` per year.
+
+```{r echo=FALSE, fig.height=5, fig.width=10}
+nsim <- 1000
+dat.raw<-data.frame(time=as.vector(time(dat_id_incidence)),
+                                 observed= dat_id)
+sims <- lapply(seq_len(nsim), function(i) {
+  data.frame(time = as.vector(time(dat_id_incidence)),
+             y = rnbinom(length(dat_id), mu = fitted(hhh4fit),
+                         size = exp(hhh4fit$coefficients[["-log(overdisp)"]])),
+             iteration = i)
+})
+
+tmp <- do.call(rbind, sims)
+
+p <- ggplot(tmp, aes(x=time,y=y)) + geom_fan() +scale_fill_gradient(low="red", high="yellow")+
+  theme_bw() + ylab(ylab_id)+geom_point(data=dat.raw,aes(x=time,y=observed))+geom_line(data=dat.raw,aes(x=time,y=observed))+  theme_bw() +
+  theme(panel.grid.minor = element_blank(),axis.title.x = element_text(face="bold", colour="black", size=15, margin = margin(t = 20,r = 20,b =20, l = 20)),
+        axis.title.y = element_text(face="bold", colour="black", size=15, margin = margin(t = 20,r = 20,b = 20, l = 20)),
+        axis.text.y = element_text( colour="black", size=15),
+        axis.text.x = element_text( colour="black", size=15),
+        axis.ticks.x=element_blank(),
+        legend.text = element_text(size = 15),
+        legend.title = element_blank(),
+        legend.key = element_rect(colour = NA),
+        strip.text=element_text(face = "bold",size=15)) +xlab("Year")
+print(p)
+```
+
+
+
+
+
+
+
+#### Hepatitis
+
+```{r include=FALSE}
+i<-diseases_names[8]
+
+dat_id<-getid_(i,from="2005-01-01",to="2015-12-31") %>% filter(province=="Ho Chi Minh") %>% mutate(month=as.numeric(factor(month)))  %>% mutate(month.y=paste(year,month,sep=".")) 
+
+if(i=="rubella"){
+      year.start<-2011
+      month.start<-1
+      dat_id %<>% filter(year>=2011)
+  }else{
+      year.start<-dat_id$year[1]
+      month.start<-dat_id$month[1]
+}
+
+dat_id<-dat_id[,4]
+dat_id_incidence<-ts(dat_id,start=c(year.start, month.start), frequency = 12)
+  
+z.sts <- as(dat_id_incidence, "sts")
+ plot(z.sts)
+( f_S1 <- addSeason2formula(f = ~ 1+t, S = 1, period = 12*5))
+fit_id_1 <- hhh4(z.sts, control = list(ar = list(f = ~ t),end = list(f = f_S1),family = "NegBin1"))
+
+( f_S2 <- addSeason2formula(f = ~ 1+t, S = 3, period = 12*5))
+fit_id_2 <- hhh4(z.sts, control = list(ar = list(f = ~ t),end = list(f = f_S2),family = "NegBin1"))
+AIC(fit_id_1,fit_id_2)
+
+plot(fit_id_1,type="season")
+fitSim <- simulate(fit_id_2,nsim = 500, seed = 1,ystart=2005)
+ylab_id<-paste("Number of",i,"[cases]")
+### using simulation function to plot the CI confidence interval for the model.
+plot(fitSim, "fan", means.args = list(), key.args = list(),ylab= ylab_id,ystart=2005)
+```
+
+
+
+
+
+
+```{r echo=FALSE}
+hhh4fit<-fit_id_1
+tab<-cbind(Estimate=summary(hhh4fit)$fixef[,1],confint(hhh4fit))
+knitr::kable(tab)
+```
+
+There was slight declined trend in the endemic component of incidence of hepatitis with incidence rate ratio (IRR) =`r paste(round(exp(tab["end.t",1]),3)," 95%CI (",round(exp(tab["end.t",2]),3),",",round(exp(tab["end.t",3]),3),")",sep="")` per year.
+
+```{r echo=FALSE, fig.height=5, fig.width=10}
+nsim <- 1000
+dat.raw<-data.frame(time=as.vector(time(dat_id_incidence)),
+                                 observed= dat_id)
+sims <- lapply(seq_len(nsim), function(i) {
+  data.frame(time = as.vector(time(dat_id_incidence)),
+             y = rnbinom(length(dat_id), mu = fitted(hhh4fit),
+                         size = exp(hhh4fit$coefficients[["-log(overdisp)"]])),
+             iteration = i)
+})
+
+tmp <- do.call(rbind, sims)
+
+p <- ggplot(tmp, aes(x=time,y=y)) + geom_fan() +scale_fill_gradient(low="red", high="yellow")+
+  theme_bw() + ylab(ylab_id)+geom_point(data=dat.raw,aes(x=time,y=observed))+geom_line(data=dat.raw,aes(x=time,y=observed))+  theme_bw() +
+  theme(panel.grid.minor = element_blank(),axis.title.x = element_text(face="bold", colour="black", size=15, margin = margin(t = 20,r = 20,b =20, l = 20)),
+        axis.title.y = element_text(face="bold", colour="black", size=15, margin = margin(t = 20,r = 20,b = 20, l = 20)),
+        axis.text.y = element_text( colour="black", size=15),
+        axis.text.x = element_text( colour="black", size=15),
+        axis.ticks.x=element_blank(),
+        legend.text = element_text(size = 15),
+        legend.title = element_blank(),
+        legend.key = element_rect(colour = NA),
+        strip.text=element_text(face = "bold",size=15)) +xlab("Year")+scale_y_continuous(trans='sqrt')
+print(p)
+```
+
+
+
+
+
+
+
+
+
+#### Shigella
+
+```{r include=FALSE}
+i<-diseases_names[16]
+
+dat_id<-getid_(i,from="2005-01-01",to="2015-12-31") %>% filter(province=="Ho Chi Minh") %>% mutate(month=as.numeric(factor(month)))  %>% mutate(month.y=paste(year,month,sep=".")) 
+
+if(i=="rubella"){
+      year.start<-2011
+      month.start<-1
+      dat_id %<>% filter(year>=2011)
+  }else{
+      year.start<-dat_id$year[1]
+      month.start<-dat_id$month[1]
+}
+
+dat_id<-dat_id[,4]
+dat_id_incidence<-ts(dat_id,start=c(year.start, month.start), frequency = 12)
+  
+z.sts <- as(dat_id_incidence, "sts")
+plot(z.sts)
+( f_S1 <- addSeason2formula(f = ~ 1+t, S = 1, period = 12))
+fit_id_1 <- hhh4(z.sts, control = list(ar = list(f = ~ 1),end = list(f = f_S1),family = "NegBin1"))
+
+( f_S2 <- addSeason2formula(f = ~ 1+t, S = 3, period = 12))
+fit_id_2 <- hhh4(z.sts, control = list(ar = list(f = ~ 1),end = list(f = f_S2),family = "NegBin1"))
+AIC(fit_id_1,fit_id_2)
+
+plot(fit_id_1,type="season")
+fitSim <- simulate(fit_id_1,nsim = 500, seed = 1,ystart=2005)
+ylab_id<-paste("Number of",i,"[cases]")
+plot(fitSim, "fan", means.args = list(), key.args = list(),ylab= ylab_id,ystart=2005)
+```
+
+
+
+```{r echo=FALSE}
+hhh4fit<-fit_id_1
+tab<-cbind(Estimate=summary(hhh4fit)$fixef[,1],confint(hhh4fit))
+knitr::kable(tab)
+```
+
+
+* There was a declined trend in the cases of Shigella with incidence rate ratio (IRR) =`r paste(round(exp(tab["end.t",1]),3)," 95%CI (",round(exp(tab["end.t",2]),3),",",round(exp(tab["end.t",3]),3),")",sep="")` per year.
+
+```{r echo=FALSE, fig.height=5, fig.width=10}
+nsim <- 1000
+dat.raw<-data.frame(time=as.vector(time(dat_id_incidence)),
+                                 observed= dat_id)
+sims <- lapply(seq_len(nsim), function(i) {
+  data.frame(time = as.vector(time(dat_id_incidence)),
+             y = rnbinom(length(dat_id), mu = fitted(hhh4fit),
+                         size = exp(hhh4fit$coefficients[["-log(overdisp)"]])),
+             iteration = i)
+})
+
+tmp <- do.call(rbind, sims)
+
+p <- ggplot(tmp, aes(x=time,y=y)) + geom_fan() +scale_fill_gradient(low="red", high="yellow")+
+  theme_bw() + ylab(ylab_id)+geom_point(data=dat.raw,aes(x=time,y=observed))+geom_line(data=dat.raw,aes(x=time,y=observed))+  theme_bw() +
+  theme(panel.grid.minor = element_blank(),axis.title.x = element_text(face="bold", colour="black", size=15, margin = margin(t = 20,r = 20,b =20, l = 20)),
+        axis.title.y = element_text(face="bold", colour="black", size=15, margin = margin(t = 20,r = 20,b = 20, l = 20)),
+        axis.text.y = element_text( colour="black", size=15),
+        axis.text.x = element_text( colour="black", size=15),
+        axis.ticks.x=element_blank(),
+        legend.text = element_text(size = 15),
+        legend.title = element_blank(),
+        legend.key = element_rect(colour = NA),
+        strip.text=element_text(face = "bold",size=15)) +xlab("Year")+scale_y_continuous(trans='sqrt')
+print(p)
+```
+
+
+
+
+
+
+
+
+
+#### Typhoid
+
+```{r include=FALSE}
+i<-diseases_names[19]
+
+dat_id<-getid_(i,from="2005-01-01",to="2015-12-31") %>% filter(province=="Ho Chi Minh") %>% mutate(month=as.numeric(factor(month)))  %>% mutate(month.y=paste(year,month,sep=".")) 
+
+if(i=="rubella"){
+      year.start<-2011
+      month.start<-1
+      dat_id %<>% filter(year>=2011)
+  }else{
+      year.start<-dat_id$year[1]
+      month.start<-dat_id$month[1]
+}
+
+dat_id<-dat_id[,4]
+dat_id_incidence<-ts(dat_id,start=c(year.start, month.start), frequency = 12)
+  
+z.sts <- as(dat_id_incidence, "sts")
+plot(z.sts)
+( f_S1 <- addSeason2formula(f = ~ 1+t, S = 1, period = 12*5))
+fit_id_1 <- hhh4(z.sts, control = list(ar = list(f = ~ t),end = list(f = f_S1),family = "NegBin1"))
+
+( f_S2 <- addSeason2formula(f = ~ 1+t, S = 3, period = 12*5))
+fit_id_2 <- hhh4(z.sts, control = list(ar = list(f = ~ t),end = list(f = f_S2),family = "NegBin1"))
+AIC(fit_id_1,fit_id_2)
+
+plot(fit_id_1,type="season")
+fitSim <- simulate(fit_id_2,nsim = 500, seed = 1,ystart=2005)
+ylab_id<-paste("Number of",i,"[cases]")
+plot(fitSim, "fan", means.args = list(), key.args = list(),ylab= ylab_id,ystart=2005)
+```
+
+
+
+
+
+```{r echo=FALSE}
+hhh4fit<-fit_id_1
+tab<-cbind(Estimate=summary(hhh4fit)$fixef[,1],confint(hhh4fit))
+knitr::kable(tab)
+```
+
+
+* There were a decline trend of typhoid with incidence rate ratio (IRR) =`r paste(round(exp(tab["end.t",1]),3)," 95%CI (",round(exp(tab["end.t",2]),3),",",round(exp(tab["end.t",3]),3),")",sep="")` per year.
+
+```{r echo=FALSE, fig.height=5, fig.width=10}
+nsim <- 1000
+dat.raw<-data.frame(time=as.vector(time(dat_id_incidence)),
+                                 observed= dat_id)
+sims <- lapply(seq_len(nsim), function(i) {
+  data.frame(time = as.vector(time(dat_id_incidence)),
+             y = rnbinom(length(dat_id), mu = fitted(hhh4fit),
+                         size = exp(hhh4fit$coefficients[["-log(overdisp)"]])),
+             iteration = i)
+})
+
+tmp <- do.call(rbind, sims)
+
+p <- ggplot(tmp, aes(x=time,y=y)) + geom_fan() +scale_fill_gradient(low="red", high="yellow")+
+  theme_bw() + ylab(ylab_id)+geom_point(data=dat.raw,aes(x=time,y=observed))+geom_line(data=dat.raw,aes(x=time,y=observed))+  theme_bw() +
+  theme(panel.grid.minor = element_blank(),axis.title.x = element_text(face="bold", colour="black", size=15, margin = margin(t = 20,r = 20,b =20, l = 20)),
+        axis.title.y = element_text(face="bold", colour="black", size=15, margin = margin(t = 20,r = 20,b = 20, l = 20)),
+        axis.text.y = element_text( colour="black", size=15),
+        axis.text.x = element_text( colour="black", size=15),
+        axis.ticks.x=element_blank(),
+        legend.text = element_text(size = 15),
+        legend.title = element_blank(),
+        legend.key = element_rect(colour = NA),
+        strip.text=element_text(face = "bold",size=15)) +xlab("Year")+scale_y_continuous(trans='sqrt')
+print(p)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+### Disease with upward trend with respect to calendar time
+
+#### Encephalitis
+
+```{r include=FALSE}
+i<-diseases_names[7]
+
+dat_id<-getid_(i,from="2005-01-01",to="2015-12-31") %>% filter(province=="Ho Chi Minh") %>% mutate(month=as.numeric(factor(month)))  %>% mutate(month.y=paste(year,month,sep=".")) 
+
+if(i=="rubella"){
+      year.start<-2011
+      month.start<-1
+      dat_id %<>% filter(year>=2011)
+  }else{
+      year.start<-dat_id$year[1]
+      month.start<-dat_id$month[1]
+}
+
+dat_id<-dat_id[,4]
+dat_id_incidence<-ts(dat_id,start=c(year.start, month.start), frequency = 12)
+  
+z.sts <- as(dat_id_incidence, "sts")
+ plot(z.sts)
+( f_S1 <- addSeason2formula(f = ~ 1+t, S = 1, period = 12))
+fit_id_1 <- hhh4(z.sts, control = list(ar = list(f = ~ t),end = list(f = f_S1),family = "NegBin1"))
+
+( f_S2 <- addSeason2formula(f = ~ 1+t, S = 1, period = 24))
+fit_id_2 <- hhh4(z.sts, control = list(ar = list(f = ~ t),end = list(f = f_S2),family = "NegBin1"))
+AIC(fit_id_1,fit_id_2)
+
+plot(fit_id_2,type="season")
+fitSim <- simulate(fit_id_2,nsim = 500, seed = 1,ystart=2005)
+ylab_id<-paste("Number of",i,"[cases]")
+### using simulation function to plot the CI confidence interval for the model.
+plot(fitSim, "fan", means.args = list(), key.args = list(),ylab= ylab_id,ystart=2005)
+```
+
+
+
+
+```{r echo=FALSE}
+hhh4fit<-fit_id_2
+tab<-cbind(Estimate=summary(hhh4fit)$fixef[,1],confint(hhh4fit))
+knitr::kable(tab)
+```
+
+There was slight upward trend in the number ocases of encephalitis with incidence rate ratio (IRR) =`r paste(round(exp(tab["end.t",1]),3)," 95%CI (",round(exp(tab["end.t",2]),3),",",round(exp(tab["end.t",3]),3),")",sep="")` per year.
+
+```{r echo=FALSE, fig.height=5, fig.width=10}
+nsim <- 1000
+dat.raw<-data.frame(time=as.vector(time(dat_id_incidence)),
+                                 observed= dat_id)
+sims <- lapply(seq_len(nsim), function(i) {
+  data.frame(time = as.vector(time(dat_id_incidence)),
+             y = rnbinom(length(dat_id), mu = fitted(hhh4fit),
+                         size = exp(hhh4fit$coefficients[["-log(overdisp)"]])),
+             iteration = i)
+})
+
+tmp <- do.call(rbind, sims)
+
+p <- ggplot(tmp, aes(x=time,y=y)) + geom_fan() +scale_fill_gradient(low="red", high="yellow")+
+  theme_bw() + ylab(ylab_id)+geom_point(data=dat.raw,aes(x=time,y=observed))+geom_line(data=dat.raw,aes(x=time,y=observed))+  theme_bw() +
+  theme(panel.grid.minor = element_blank(),axis.title.x = element_text(face="bold", colour="black", size=15, margin = margin(t = 20,r = 20,b =20, l = 20)),
+        axis.title.y = element_text(face="bold", colour="black", size=15, margin = margin(t = 20,r = 20,b = 20, l = 20)),
+        axis.text.y = element_text( colour="black", size=15),
+        axis.text.x = element_text( colour="black", size=15),
+        axis.ticks.x=element_blank(),
+        legend.text = element_text(size = 15),
+        legend.title = element_blank(),
+        legend.key = element_rect(colour = NA),
+        strip.text=element_text(face = "bold",size=15)) +xlab("Year")+scale_y_continuous(trans='sqrt')
+print(p)
+```
+
+
+
+
+
+
+
+
+
+#### Mumps
+
+
+```{r include=FALSE}
+i<-diseases_names[11]
+
+dat_id<-getid_(i,from="2005-01-01",to="2015-12-31") %>% filter(province=="Ho Chi Minh") %>% mutate(month=as.numeric(factor(month)))  %>% mutate(month.y=paste(year,month,sep=".")) 
+
+if(i=="rubella"){
+      year.start<-2011
+      month.start<-1
+      dat_id %<>% filter(year>=2011)
+  }else{
+      year.start<-dat_id$year[1]
+      month.start<-dat_id$month[1]
+}
+
+dat_id<-dat_id[,4]
+dat_id_incidence<-ts(dat_id,start=c(year.start, month.start), frequency = 12)
+  
+z.sts <- as(dat_id_incidence, "sts")
+ plot(z.sts)
+( f_S1 <- addSeason2formula(f = ~ 1+t, S = 1, period = 12))
+fit_id_1 <- hhh4(z.sts, control = list(ar = list(f = ~ t),end = list(f = f_S1),family = "NegBin1"))
+
+( f_S2 <- addSeason2formula(f = ~ 1+t, S = 2, period = 12))
+fit_id_2 <- hhh4(z.sts, control = list(ar = list(f = ~ t),end = list(f = f_S2),family = "NegBin1"))
+AIC(fit_id_1,fit_id_2)
+
+plot(fit_id_1,type="season")
+fitSim <- simulate(fit_id_1,nsim = 500, seed = 1,ystart=2005)
+ylab_id<-paste("Number of",i,"[cases]")
+### using simulation function to plot the CI confidence interval for the model.
+plot(fitSim, "fan", means.args = list(), key.args = list(),ylab= ylab_id,ystart=2005)
+```
+
+
+
+```{r echo=FALSE}
+hhh4fit<-fit_id_1
+tab<-cbind(Estimate=summary(hhh4fit)$fixef[,1],confint(hhh4fit))
+knitr::kable(tab)
+```
+
+There was slight upward trend in this period in both endemic and epidemic components
+
+```{r echo=FALSE, fig.height=5, fig.width=10}
+nsim <- 1000
+dat.raw<-data.frame(time=as.vector(time(dat_id_incidence)),
+                                 observed= dat_id)
+sims <- lapply(seq_len(nsim), function(i) {
+  data.frame(time = as.vector(time(dat_id_incidence)),
+             y = rnbinom(length(dat_id), mu = fitted(hhh4fit),
+                         size = exp(hhh4fit$coefficients[["-log(overdisp)"]])),
+             iteration = i)
+})
+
+tmp <- do.call(rbind, sims)
+
+p <- ggplot(tmp, aes(x=time,y=y)) + geom_fan() +scale_fill_gradient(low="red", high="yellow")+
+  theme_bw() + ylab(ylab_id)+geom_point(data=dat.raw,aes(x=time,y=observed))+geom_line(data=dat.raw,aes(x=time,y=observed))+  theme_bw() +
+  theme(panel.grid.minor = element_blank(),axis.title.x = element_text(face="bold", colour="black", size=15, margin = margin(t = 20,r = 20,b =20, l = 20)),
+        axis.title.y = element_text(face="bold", colour="black", size=15, margin = margin(t = 20,r = 20,b = 20, l = 20)),
+        axis.text.y = element_text( colour="black", size=15),
+        axis.text.x = element_text( colour="black", size=15),
+        axis.ticks.x=element_blank(),
+        legend.text = element_text(size = 15),
+        legend.title = element_blank(),
+        legend.key = element_rect(colour = NA),
+        strip.text=element_text(face = "bold",size=15)) +xlab("Year")+scale_y_continuous(trans='sqrt')
+print(p)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+### Disease with unclear linear trend with respect to calendar time
+
+
+### Chickenpox
+
+```{r fig.height=7, fig.width=10, include=FALSE}
+
+i<-diseases_names[2]
+
+dat_id<-getid_(i,from="2005-01-01",to="2015-12-31") %>% filter(province=="Ho Chi Minh") %>% mutate(month=as.numeric(factor(month)))  %>% mutate(month.y=paste(year,month,sep=".")) 
+
+if(i=="rubella"){
+      year.start<-2011
+      month.start<-1
+      dat_id %<>% filter(year>=2011)
+  }else{
+      year.start<-dat_id$year[1]
+      month.start<-dat_id$month[1]
+}
+
+dat_id<-dat_id[,4]
+dat_id_incidence<-ts(dat_id,start=c(year.start, month.start), frequency = 12)
+  
+z.sts <- as(dat_id_incidence, "sts")
+ plot(z.sts)
+( f_S1 <- addSeason2formula(f = ~ 1+t, S = 1, period = 12))
+fit_id_1 <- hhh4(z.sts, control = list(ar = list(f = ~ t),end = list(f = f_S1),family = "NegBin1"))
+
+( f_S2 <- addSeason2formula(f = ~ 1+t, S = 2, period = 12))
+fit_id_2 <- hhh4(z.sts, control = list(ar = list(f = ~ t),end = list(f = f_S2),family = "NegBin1"))
+AIC(fit_id_1,fit_id_2)
+
+plot(fit_id_2,type="season")
+fitSim <- simulate(fit_id_2,nsim = 500, seed = 1)
+ylab_id<-paste("Number of",i,"[cases]")
+### using simulation function to plot the CI confidence interval for the model.
+plot(fitSim, "fan", means.args = list(), key.args = list(),ylab= ylab_id,xaxis.tickFreq=list("%y"=atChange),xaxis.labelFormat="%y",legend.opts=NULL,xlab="",las=2,cex.axis=0.8)
+```
+
+
+```{r echo=FALSE}
+hhh4fit<-fit_id_2
+tab<-cbind(Estimate=summary(hhh4fit)$fixef[,1],confint(hhh4fit))
+knitr::kable(tab)
+```
+
+* There was no clear upward of the cases of Chickenpox. 
+
+```{r echo=FALSE, fig.height=5, fig.width=10}
+nsim <- 1000
+dat.raw<-data.frame(time=as.vector(time(dat_id_incidence)),
+                                 observed= dat_id)
+sims <- lapply(seq_len(nsim), function(i) {
+  data.frame(time = as.vector(time(dat_id_incidence)),
+             y = rnbinom(length(dat_id), mu = fitted(hhh4fit),
+                         size = exp(hhh4fit$coefficients[["-log(overdisp)"]])),
+             iteration = i)
+})
+
+tmp <- do.call(rbind, sims)
+
+p <- ggplot(tmp, aes(x=time,y=y)) + geom_fan() +scale_fill_gradient(low="red", high="yellow")+
+  theme_bw() + ylab(ylab_id)+geom_point(data=dat.raw,aes(x=time,y=observed))+geom_line(data=dat.raw,aes(x=time,y=observed))+  theme_bw() +
+  theme(panel.grid.minor = element_blank(),axis.title.x = element_text(face="bold", colour="black", size=15, margin = margin(t = 20,r = 20,b =20, l = 20)),
+        axis.title.y = element_text(face="bold", colour="black", size=15, margin = margin(t = 20,r = 20,b = 20, l = 20)),
+        axis.text.y = element_text( colour="black", size=15),
+        axis.text.x = element_text( colour="black", size=15),
+        axis.ticks.x=element_blank(),
+        legend.text = element_text(size = 15),
+        legend.title = element_blank(),
+        legend.key = element_rect(colour = NA),
+        strip.text=element_text(face = "bold",size=15)) +xlab("Year")
+print(p)
+```
+
+
+
+
+### Dengue
+
+```{r include=FALSE}
+i<-diseases_names[3]
+
+dat_id<-getid_(i,from="2005-01-01",to="2015-12-31") %>% filter(province=="Ho Chi Minh") %>% mutate(month=as.numeric(factor(month)))  %>% mutate(month.y=paste(year,month,sep=".")) 
+
+if(i=="rubella"){
+      year.start<-2011
+      month.start<-1
+      dat_id %<>% filter(year>=2011)
+  }else{
+      year.start<-dat_id$year[1]
+      month.start<-dat_id$month[1]
+}
+
+dat_id<-dat_id[,4]
+dat_id_incidence<-ts(dat_id,start=c(year.start, month.start), frequency = 12)
+  
+z.sts <- as(dat_id_incidence, "sts")
+ plot(z.sts)
+( f_S1 <- addSeason2formula(f = ~ 1+t, S = 1, period = 12))
+fit_id_1 <- hhh4(z.sts, control = list(ar = list(f = ~ 1),end = list(f = f_S1),family = "NegBin1"))
+
+( f_S2 <- addSeason2formula(f = ~ 1+t, S = 2, period = 12))
+fit_id_2 <- hhh4(z.sts, control = list(ar = list(f = ~ 1),end = list(f = f_S2),family = "NegBin1"))
+AIC(fit_id_1,fit_id_2)
+
+plot(fit_id_2,type="season")
+fitSim <- simulate(fit_id_2,nsim = 500, seed = 1)
+ylab_id<-paste("Number of",i,"[cases]")
+### using simulation function to plot the CI confidence interval for the model.
+plot(fitSim, "fan", means.args = list(), key.args = list(),ylab= ylab_id)
+
+
+```
+
+
+```{r echo=FALSE}
+hhh4fit<-fit_id_2
+tab<-cbind(Estimate=summary(hhh4fit)$fixef[,1],confint(hhh4fit))
+knitr::kable(tab)
+```
+
+There was no clear upward or downward trend in this period for dengue.
+
+```{r echo=FALSE, fig.height=5, fig.width=10}
+nsim <- 1000
+dat.raw<-data.frame(time=as.vector(time(dat_id_incidence)),
+                                 observed= dat_id)
+sims <- lapply(seq_len(nsim), function(i) {
+  data.frame(time = as.vector(time(dat_id_incidence)),
+             y = rnbinom(length(dat_id), mu = fitted(hhh4fit),
+                         size = exp(hhh4fit$coefficients[["-log(overdisp)"]])),
+             iteration = i)
+})
+
+tmp <- do.call(rbind, sims)
+
+p <- ggplot(tmp, aes(x=time,y=y)) + geom_fan() +scale_fill_gradient(low="red", high="yellow")+
+  theme_bw() + ylab(ylab_id)+geom_point(data=dat.raw,aes(x=time,y=observed))+geom_line(data=dat.raw,aes(x=time,y=observed))+  theme_bw() +
+  theme(panel.grid.minor = element_blank(),axis.title.x = element_text(face="bold", colour="black", size=15, margin = margin(t = 20,r = 20,b =20, l = 20)),
+        axis.title.y = element_text(face="bold", colour="black", size=15, margin = margin(t = 20,r = 20,b = 20, l = 20)),
+        axis.text.y = element_text( colour="black", size=15),
+        axis.text.x = element_text( colour="black", size=15),
+        axis.ticks.x=element_blank(),
+        legend.text = element_text(size = 15),
+        legend.title = element_blank(),
+        legend.key = element_rect(colour = NA),
+        strip.text=element_text(face = "bold",size=15)) +xlab("Year")
+print(p)
+```
+
+
+### Diarrhea
+
+```{r include=FALSE}
+i<-diseases_names[4]
+
+dat_id<-getid_(i,from="2005-01-01",to="2015-12-31") %>% filter(province=="Ho Chi Minh") %>% mutate(month=as.numeric(factor(month)))  %>% mutate(month.y=paste(year,month,sep=".")) 
+
+if(i=="rubella"){
+      year.start<-2011
+      month.start<-1
+      dat_id %<>% filter(year>=2011)
+  }else{
+      year.start<-dat_id$year[1]
+      month.start<-dat_id$month[1]
+}
+
+dat_id<-dat_id[,4]
+dat_id_incidence<-ts(dat_id,start=c(year.start, month.start), frequency = 12)
+  
+z.sts <- as(dat_id_incidence, "sts")
+ plot(z.sts)
+( f_S1 <- addSeason2formula(f = ~ 1+t, S = 1, period = 12*7))
+fit_id_1 <- hhh4(z.sts, control = list(ar = list(f = ~ 1),end = list(f = f_S1),family = "NegBin1"))
+
+( f_S2 <- addSeason2formula(f = ~ 1+t, S = 2, period = 12*7))
+fit_id_2 <- hhh4(z.sts, control = list(ar = list(f = ~ 1),end = list(f = f_S2),family = "NegBin1"))
+AIC(fit_id_1,fit_id_2)
+
+plot(fit_id_2,type="season")
+fitSim <- simulate(fit_id_2,nsim = 500, seed = 1)
+ylab_id<-paste("Number of",i,"[cases]")
+### using simulation function to plot the CI confidence interval for the model.
+plot(fitSim, "fan", means.args = list(), key.args = list(),ylab= ylab_id)
+```
+
+
+
+```{r echo=FALSE}
+hhh4fit<-fit_id_2
+tab<-cbind(Estimate=summary(hhh4fit)$fixef[,1],confint(hhh4fit))
+knitr::kable(tab)
+```
+
+There was no clear upward or downward trend in this period for diarrhea.
+
+```{r echo=FALSE, fig.height=5, fig.width=10}
+nsim <- 1000
+dat.raw<-data.frame(time=as.vector(time(dat_id_incidence)),
+                                 observed= dat_id)
+sims <- lapply(seq_len(nsim), function(i) {
+  data.frame(time = as.vector(time(dat_id_incidence)),
+             y = rnbinom(length(dat_id), mu = fitted(hhh4fit),
+                         size = exp(hhh4fit$coefficients[["-log(overdisp)"]])),
+             iteration = i)
+})
+
+tmp <- do.call(rbind, sims)
+
+p <- ggplot(tmp, aes(x=time,y=y)) + geom_fan() +scale_fill_gradient(low="red", high="yellow")+
+  theme_bw() + ylab(ylab_id)+geom_point(data=dat.raw,aes(x=time,y=observed))+geom_line(data=dat.raw,aes(x=time,y=observed))+  theme_bw() +
+  theme(panel.grid.minor = element_blank(),axis.title.x = element_text(face="bold", colour="black", size=15, margin = margin(t = 20,r = 20,b =20, l = 20)),
+        axis.title.y = element_text(face="bold", colour="black", size=15, margin = margin(t = 20,r = 20,b = 20, l = 20)),
+        axis.text.y = element_text( colour="black", size=15),
+        axis.text.x = element_text( colour="black", size=15),
+        axis.ticks.x=element_blank(),
+        legend.text = element_text(size = 15),
+        legend.title = element_blank(),
+        legend.key = element_rect(colour = NA),
+        strip.text=element_text(face = "bold",size=15)) +xlab("Year")+scale_y_continuous(trans='sqrt')
+print(p)
+```
+
+
+
+
+
+
+
+
+### Dysenteria
+
+```{r include=FALSE}
+i<-diseases_names[6]
+
+dat_id<-getid_(i,from="2005-01-01",to="2015-12-31") %>% filter(province=="Ho Chi Minh") %>% mutate(month=as.numeric(factor(month)))  %>% mutate(month.y=paste(year,month,sep=".")) 
+
+if(i=="rubella"){
+      year.start<-2011
+      month.start<-1
+      dat_id %<>% filter(year>=2011)
+  }else{
+      year.start<-dat_id$year[1]
+      month.start<-dat_id$month[1]
+}
+
+dat_id<-dat_id[,4]
+dat_id_incidence<-ts(dat_id,start=c(year.start, month.start), frequency = 12)
+  
+z.sts <- as(dat_id_incidence, "sts")
+ plot(z.sts)
+( f_S1 <- addSeason2formula(f = ~ 1+t, S = 1, period = 24))
+fit_id_1 <- hhh4(z.sts, control = list(ar = list(f = ~ 1),end = list(f = f_S1),family = "NegBin1"))
+
+( f_S2 <- addSeason2formula(f = ~ 1+t, S = 2, period = 24))
+fit_id_2 <- hhh4(z.sts, control = list(ar = list(f = ~ 1),end = list(f = f_S2),family = "NegBin1"))
+AIC(fit_id_1,fit_id_2)
+
+plot(fit_id_1,type="season")
+fitSim <- simulate(fit_id_2,nsim = 500, seed = 1)
+ylab_id<-paste("Number of",i,"[cases]")
+### using simulation function to plot the CI confidence interval for the model.
+plot(fitSim, "fan", means.args = list(), key.args = list(),ylab= ylab_id,ystart=2005)
+```
+
+
+
+
+```{r echo=FALSE}
+hhh4fit<-fit_id_1
+tab<-cbind(Estimate=summary(hhh4fit)$fixef[,1],confint(hhh4fit))
+knitr::kable(tab)
+```
+
+* There was no decline trend of the cases of dysenteria.
+
+```{r echo=FALSE, fig.height=5, fig.width=10}
+nsim <- 1000
+dat.raw<-data.frame(time=as.vector(time(dat_id_incidence)),
+                                 observed= dat_id)
+sims <- lapply(seq_len(nsim), function(i) {
+  data.frame(time = as.vector(time(dat_id_incidence)),
+             y = rnbinom(length(dat_id), mu = fitted(hhh4fit),
+                         size = exp(hhh4fit$coefficients[["-log(overdisp)"]])),
+             iteration = i)
+})
+
+tmp <- do.call(rbind, sims)
+
+p <- ggplot(tmp, aes(x=time,y=y)) + geom_fan() +scale_fill_gradient(low="red", high="yellow")+
+  theme_bw() + ylab(ylab_id)+geom_point(data=dat.raw,aes(x=time,y=observed))+geom_line(data=dat.raw,aes(x=time,y=observed))+  theme_bw() +
+  theme(panel.grid.minor = element_blank(),axis.title.x = element_text(face="bold", colour="black", size=15, margin = margin(t = 20,r = 20,b =20, l = 20)),
+        axis.title.y = element_text(face="bold", colour="black", size=15, margin = margin(t = 20,r = 20,b = 20, l = 20)),
+        axis.text.y = element_text( colour="black", size=15),
+        axis.text.x = element_text( colour="black", size=15),
+        axis.ticks.x=element_blank(),
+        legend.text = element_text(size = 15),
+        legend.title = element_blank(),
+        legend.key = element_rect(colour = NA),
+        strip.text=element_text(face = "bold",size=15)) +xlab("Year")+scale_y_continuous(trans='sqrt')
+print(p)
+```
+
+
+
+
+
+
+
+
+### Hand-Foot-Mouth disease
+
+```{r include=FALSE}
+i<-diseases_names[9]
+
+dat_id<-getid_(i,from="2005-01-01",to="2015-12-31") %>% filter(province=="Ho Chi Minh") %>% mutate(month=as.numeric(factor(month)))  %>% mutate(month.y=paste(year,month,sep=".")) 
+
+if(i=="rubella"){
+      year.start<-2011
+      month.start<-1
+      dat_id %<>% filter(year>=2011)
+  }else{
+      year.start<-dat_id$year[1]
+      month.start<-dat_id$month[1]
+}
+
+dat_id<-dat_id[,4]
+dat_id_incidence<-ts(dat_id,start=c(year.start, month.start), frequency = 12)
+  
+z.sts <- as(dat_id_incidence, "sts")
+ plot(z.sts)
+( f_S1 <- addSeason2formula(f = ~ 1+t, S = 1, period = 6))
+fit_id_1 <- hhh4(z.sts, control = list(ar = list(f = ~ 1),end = list(f = f_S1),family = "NegBin1"))
+
+( f_S2 <- addSeason2formula(f = ~ 1+t, S = 2, period = 12))
+fit_id_2 <- hhh4(z.sts, control = list(ar = list(f = ~ 1),end = list(f = f_S2),family = "NegBin1"))
+AIC(fit_id_1,fit_id_2)
+
+plot(fit_id_2,type="season")
+fitSim <- simulate(fit_id_2,nsim = 500, seed = 1,ystart=2005)
+ylab_id<-paste("Number of",i,"[cases]")
+### using simulation function to plot the CI confidence interval for the model.
+plot(fitSim, "fan", means.args = list(), key.args = list(),ylab= ylab_id,ystart=2005)
+```
+
+
+
+```{r echo=FALSE}
+hhh4fit<-fit_id_2
+tab<-cbind(Estimate=summary(hhh4fit)$fixef[,1],confint(hhh4fit))
+knitr::kable(tab)
+```
+
+There was no declined trend in the incidence of Hand-Foot-Mouth diesease.
+
+```{r echo=FALSE, fig.height=5, fig.width=10}
+nsim <- 1000
+dat.raw<-data.frame(time=as.vector(time(dat_id_incidence)),
+                                 observed= dat_id)
+sims <- lapply(seq_len(nsim), function(i) {
+  data.frame(time = as.vector(time(dat_id_incidence)),
+             y = rnbinom(length(dat_id), mu = fitted(hhh4fit),
+                         size = exp(hhh4fit$coefficients[["-log(overdisp)"]])),
+             iteration = i)
+})
+
+tmp <- do.call(rbind, sims)
+
+p <- ggplot(tmp, aes(x=time,y=y)) + geom_fan() +scale_fill_gradient(low="red", high="yellow")+
+  theme_bw() + ylab(ylab_id)+geom_point(data=dat.raw,aes(x=time,y=observed))+geom_line(data=dat.raw,aes(x=time,y=observed))+  theme_bw() +
+  theme(panel.grid.minor = element_blank(),axis.title.x = element_text(face="bold", colour="black", size=15, margin = margin(t = 20,r = 20,b =20, l = 20)),
+        axis.title.y = element_text(face="bold", colour="black", size=15, margin = margin(t = 20,r = 20,b = 20, l = 20)),
+        axis.text.y = element_text( colour="black", size=15),
+        axis.text.x = element_text( colour="black", size=15),
+        axis.ticks.x=element_blank(),
+        legend.text = element_text(size = 15),
+        legend.title = element_blank(),
+        legend.key = element_rect(colour = NA),
+        strip.text=element_text(face = "bold",size=15)) +xlab("Year")+scale_y_continuous(trans='sqrt')
+print(p)
+```
+
+
+
+
+
+
+
+### Measles
+
+```{r include=FALSE}
+i<-diseases_names[10]
+
+dat_id<-getid_(i,from="2005-01-01",to="2015-12-31") %>% filter(province=="Ho Chi Minh") %>% mutate(month=as.numeric(factor(month)))  %>% mutate(month.y=paste(year,month,sep=".")) 
+
+if(i=="rubella"){
+      year.start<-2011
+      month.start<-1
+      dat_id %<>% filter(year>=2011)
+  }else{
+      year.start<-dat_id$year[1]
+      month.start<-dat_id$month[1]
+}
+
+dat_id<-dat_id[,4]
+dat_id_incidence<-ts(dat_id,start=c(year.start, month.start), frequency = 12)
+  
+z.sts <- as(dat_id_incidence, "sts")
+ plot(z.sts)
+( f_S1 <- addSeason2formula(f = ~ 1, S = 7, period = 12*5))
+fit_id_1 <- hhh4(z.sts, control = list(ar = list(f = ~ t),end = list(f = f_S1),family = "NegBin1"))
+
+( f_S2 <- addSeason2formula(f = ~ 1, S = 9, period = 12*5))
+fit_id_2 <- hhh4(z.sts, control = list(ar = list(f = ~ t),end = list(f = f_S2),family = "NegBin1"))
+AIC(fit_id_1,fit_id_2)
+
+plot(fit_id_2,type="season")
+fitSim <- simulate(fit_id_2,nsim = 500, seed = 1,ystart=2005)
+ylab_id<-paste("Number of",i,"[cases]")
+### using simulation function to plot the CI confidence interval for the model.
+plot(fitSim, "fan", means.args = list(), key.args = list(),ylab= ylab_id,ystart=2005)
+```
+
+
+
+
+```{r echo=FALSE}
+hhh4fit<-fit_id_2
+tab<-cbind(Estimate=summary(hhh4fit)$fixef[,1],confint(hhh4fit))
+knitr::kable(tab)
+```
+
+
+```{r echo=FALSE, fig.height=5, fig.width=10}
+nsim <- 1000
+dat.raw<-data.frame(time=as.vector(time(dat_id_incidence)),
+                                 observed= dat_id)
+sims <- lapply(seq_len(nsim), function(i) {
+  data.frame(time = as.vector(time(dat_id_incidence)),
+             y = rnbinom(length(dat_id), mu = fitted(hhh4fit),
+                         size = exp(hhh4fit$coefficients[["-log(overdisp)"]])),
+             iteration = i)
+})
+
+tmp <- do.call(rbind, sims)
+
+p <- ggplot(tmp, aes(x=time,y=y)) + geom_fan() +scale_fill_gradient(low="red", high="yellow")+
+  theme_bw() + ylab(ylab_id)+geom_point(data=dat.raw,aes(x=time,y=observed))+geom_line(data=dat.raw,aes(x=time,y=observed))+  theme_bw() +
+  theme(panel.grid.minor = element_blank(),axis.title.x = element_text(face="bold", colour="black", size=15, margin = margin(t = 20,r = 20,b =20, l = 20)),
+        axis.title.y = element_text(face="bold", colour="black", size=15, margin = margin(t = 20,r = 20,b = 20, l = 20)),
+        axis.text.y = element_text( colour="black", size=15),
+        axis.text.x = element_text( colour="black", size=15),
+        axis.ticks.x=element_blank(),
+        legend.text = element_text(size = 15),
+        legend.title = element_blank(),
+        legend.key = element_rect(colour = NA),
+        strip.text=element_text(face = "bold",size=15)) +xlab("Year")+scale_y_continuous(trans='sqrt')
+print(p)
+```
+
+
+
+
+
+
+
+
+### Pertussis
+
+```{r include=FALSE}
+i<-diseases_names[12]
+
+dat_id<-getid_(i,from="2005-01-01",to="2015-12-31") %>% filter(province=="Ho Chi Minh") %>% mutate(month=as.numeric(factor(month)))  %>% mutate(month.y=paste(year,month,sep=".")) 
+
+if(i=="rubella"){
+      year.start<-2011
+      month.start<-1
+      dat_id %<>% filter(year>=2011)
+  }else{
+      year.start<-dat_id$year[1]
+      month.start<-dat_id$month[1]
+}
+
+dat_id<-dat_id[,4]
+dat_id_incidence<-ts(dat_id,start=c(year.start, month.start), frequency = 12)
+  
+z.sts <- as(dat_id_incidence, "sts")
+ plot(z.sts)
+( f_S1 <- addSeason2formula(f = ~ 1+t, S = 1, period = 12))
+fit_id_1 <- hhh4(z.sts, control = list(ar = list(f = ~ t),end = list(f = f_S1),family = "NegBin1"))
+
+( f_S2 <- addSeason2formula(f = ~ 1+t, S = 3, period = 12))
+fit_id_2 <- hhh4(z.sts, control = list(ar = list(f = ~ t),end = list(f = f_S2),family = "NegBin1"))
+AIC(fit_id_1,fit_id_2)
+
+plot(fit_id_1,type="season")
+fitSim <- simulate(fit_id_1,nsim = 500, seed = 1,ystart=2005)
+ylab_id<-paste("Number of",i,"[cases]")
+### using simulation function to plot the CI confidence interval for the model.
+plot(fitSim, "fan", means.args = list(), key.args = list(),ylab= ylab_id,ystart=2005)
+```
+
+
+
+
+```{r echo=FALSE}
+hhh4fit<-fit_id_1
+tab<-cbind(Estimate=summary(hhh4fit)$fixef[,1],confint(hhh4fit))
+knitr::kable(tab)
+```
+
+There was no upward trend in this period.
+
+```{r echo=FALSE, fig.height=5, fig.width=10}
+nsim <- 1000
+dat.raw<-data.frame(time=as.vector(time(dat_id_incidence)),
+                                 observed= dat_id)
+sims <- lapply(seq_len(nsim), function(i) {
+  data.frame(time = as.vector(time(dat_id_incidence)),
+             y = rnbinom(length(dat_id), mu = fitted(hhh4fit),
+                         size = exp(hhh4fit$coefficients[["-log(overdisp)"]])),
+             iteration = i)
+})
+
+tmp <- do.call(rbind, sims)
+
+p <- ggplot(tmp, aes(x=time,y=y)) + geom_fan() +scale_fill_gradient(low="red", high="yellow")+
+  theme_bw() + ylab(ylab_id)+geom_point(data=dat.raw,aes(x=time,y=observed))+geom_line(data=dat.raw,aes(x=time,y=observed))+  theme_bw() +
+  theme(panel.grid.minor = element_blank(),axis.title.x = element_text(face="bold", colour="black", size=15, margin = margin(t = 20,r = 20,b =20, l = 20)),
+        axis.title.y = element_text(face="bold", colour="black", size=15, margin = margin(t = 20,r = 20,b = 20, l = 20)),
+        axis.text.y = element_text( colour="black", size=15),
+        axis.text.x = element_text( colour="black", size=15),
+        axis.ticks.x=element_blank(),
+        legend.text = element_text(size = 15),
+        legend.title = element_blank(),
+        legend.key = element_rect(colour = NA),
+        strip.text=element_text(face = "bold",size=15)) +xlab("Year")
+print(p)
+```
+
+
+
+
+
+
+
+
+### Polio
+
+```{r include=FALSE}
+i<-diseases_names[13]
+
+dat_id<-getid_(i,from="2005-01-01",to="2015-12-31") %>% filter(province=="Ho Chi Minh") %>% mutate(month=as.numeric(factor(month)))  %>% mutate(month.y=paste(year,month,sep=".")) 
+
+if(i=="rubella"){
+      year.start<-2011
+      month.start<-1
+      dat_id %<>% filter(year>=2011)
+  }else{
+      year.start<-dat_id$year[1]
+      month.start<-dat_id$month[1]
+}
+
+dat_id<-dat_id[,4]
+dat_id_incidence<-ts(dat_id,start=c(year.start, month.start), frequency = 12)
+  
+z.sts <- as(dat_id_incidence, "sts")
+plot(z.sts)
+( f_S1 <- addSeason2formula(f = ~ 1, S = 1, period = 6))
+fit_id_1 <- hhh4(z.sts, control = list(ar = list(f = ~ t),end = list(f = f_S1),family = "NegBin1"))
+
+( f_S2 <- addSeason2formula(f = ~ 1, S = 2, period = 12))
+fit_id_2 <- hhh4(z.sts, control = list(ar = list(f = ~ t),end = list(f = f_S2),family = "NegBin1"))
+AIC(fit_id_1,fit_id_2)
+
+plot(fit_id_2,type="season")
+fitSim <- simulate(fit_id_2,nsim = 500, seed = 1,ystart=2005)
+ylab_id<-paste("Number of",i,"[cases]")
+plot(fitSim, "fan", means.args = list(), key.args = list(),ylab= ylab_id,ystart=2005)
+```
+
+```{r echo=FALSE}
+hhh4fit<-fit_id_2
+tab<-cbind(Estimate=summary(hhh4fit)$fixef[,1],confint(hhh4fit))
+knitr::kable(tab)
+```
+
+There was no trend in this period.
+
+```{r echo=FALSE, fig.height=5, fig.width=10}
+nsim <- 1000
+dat.raw<-data.frame(time=as.vector(time(dat_id_incidence)),
+                                 observed= dat_id)
+sims <- lapply(seq_len(nsim), function(i) {
+  data.frame(time = as.vector(time(dat_id_incidence)),
+             y = rnbinom(length(dat_id), mu = fitted(hhh4fit),
+                         size = exp(hhh4fit$coefficients[["-log(overdisp)"]])),
+             iteration = i)
+})
+
+tmp <- do.call(rbind, sims)
+
+p <- ggplot(tmp, aes(x=time,y=y)) + geom_fan() +scale_fill_gradient(low="red", high="yellow")+
+  theme_bw() + ylab(ylab_id)+geom_point(data=dat.raw,aes(x=time,y=observed))+geom_line(data=dat.raw,aes(x=time,y=observed))+  theme_bw() +
+  theme(panel.grid.minor = element_blank(),axis.title.x = element_text(face="bold", colour="black", size=15, margin = margin(t = 20,r = 20,b =20, l = 20)),
+        axis.title.y = element_text(face="bold", colour="black", size=15, margin = margin(t = 20,r = 20,b = 20, l = 20)),
+        axis.text.y = element_text( colour="black", size=15),
+        axis.text.x = element_text( colour="black", size=15),
+        axis.ticks.x=element_blank(),
+        legend.text = element_text(size = 15),
+        legend.title = element_blank(),
+        legend.key = element_rect(colour = NA),
+        strip.text=element_text(face = "bold",size=15)) +xlab("Year")
+print(p)
+```
+
+
+
+
+
+
+
+
+
+
+### Rabies
+
+```{r include=FALSE}
+i<-diseases_names[14]
+
+dat_id<-getid_(i,from="2005-01-01",to="2015-12-31") %>% filter(province=="Ho Chi Minh") %>% mutate(month=as.numeric(factor(month)))  %>% mutate(month.y=paste(year,month,sep=".")) 
+
+if(i=="rubella"){
+      year.start<-2011
+      month.start<-1
+      dat_id %<>% filter(year>=2011)
+  }else{
+      year.start<-dat_id$year[1]
+      month.start<-dat_id$month[1]
+}
+
+dat_id<-dat_id[,4]
+dat_id_incidence<-ts(dat_id,start=c(year.start, month.start), frequency = 12)
+  
+z.sts <- as(dat_id_incidence, "sts")
+plot(z.sts)
+( f_S1 <- addSeason2formula(f = ~ 1, S = 1, period = 12))
+fit_id_1 <- hhh4(z.sts, control = list(ar = list(f = ~ 1),end = list(f = f_S1),family = "NegBin1"))
+
+( f_S2 <- addSeason2formula(f = ~ 1, S = 1, period = 24))
+fit_id_2 <- hhh4(z.sts, control = list(ar = list(f = ~ 1),end = list(f = f_S2),family = "NegBin1"))
+AIC(fit_id_1,fit_id_2)
+
+plot(fit_id_1,type="season")
+fitSim <- simulate(fit_id_2,nsim = 500, seed = 1,ystart=2005)
+ylab_id<-paste("Number of",i,"[cases]")
+plot(fitSim, "fan", means.args = list(), key.args = list(),ylab= ylab_id,ystart=2005)
+```
+
+
+
+
+```{r echo=FALSE}
+hhh4fit<-fit_id_1
+tab<-cbind(Estimate=summary(hhh4fit)$fixef[,1],confint(hhh4fit))
+knitr::kable(tab)
+```
+
+This disease doesn't have trend or seasonal pattern. It quite constant by time.
+
+```{r echo=FALSE, fig.height=5, fig.width=10}
+nsim <- 1000
+dat.raw<-data.frame(time=as.vector(time(dat_id_incidence)),
+                                 observed= dat_id)
+sims <- lapply(seq_len(nsim), function(i) {
+  data.frame(time = as.vector(time(dat_id_incidence)),
+             y = rnbinom(length(dat_id), mu = fitted(hhh4fit),
+                         size = exp(hhh4fit$coefficients[["-log(overdisp)"]])),
+             iteration = i)
+})
+
+tmp <- do.call(rbind, sims)
+
+p <- ggplot(tmp, aes(x=time,y=y)) + geom_fan() +scale_fill_gradient(low="red", high="yellow")+
+  theme_bw() + ylab(ylab_id)+geom_point(data=dat.raw,aes(x=time,y=observed))+geom_line(data=dat.raw,aes(x=time,y=observed))+  theme_bw() +
+  theme(panel.grid.minor = element_blank(),axis.title.x = element_text(face="bold", colour="black", size=15, margin = margin(t = 20,r = 20,b =20, l = 20)),
+        axis.title.y = element_text(face="bold", colour="black", size=15, margin = margin(t = 20,r = 20,b = 20, l = 20)),
+        axis.text.y = element_text( colour="black", size=15),
+        axis.text.x = element_text( colour="black", size=15),
+        axis.ticks.x=element_blank(),
+        legend.text = element_text(size = 15),
+        legend.title = element_blank(),
+        legend.key = element_rect(colour = NA),
+        strip.text=element_text(face = "bold",size=15)) +xlab("Year")+scale_y_continuous(trans='sqrt')
+print(p)
+```
+
+
+
+
+
+
+
+
+### Rubella
+
+```{r include=FALSE}
+i<-diseases_names[15]
+
+dat_id<-getid_(i,from="2005-01-01",to="2015-12-31") %>% filter(province=="Ho Chi Minh") %>% mutate(month=as.numeric(factor(month)))  %>% mutate(month.y=paste(year,month,sep=".")) 
+
+if(i=="rubella"){
+      year.start<-2011
+      month.start<-1
+      dat_id %<>% filter(year>=2011)
+  }else{
+      year.start<-dat_id$year[1]
+      month.start<-dat_id$month[1]
+}
+
+dat_id<-dat_id[,4]
+dat_id_incidence<-ts(dat_id,start=c(year.start, month.start), frequency = 12)
+  
+z.sts <- as(dat_id_incidence, "sts")
+plot(z.sts)
+( f_S1 <- addSeason2formula(f = ~ 1, S = 1, period = 12))
+fit_id_1 <- hhh4(z.sts, control = list(ar = list(f = ~ t),end = list(f = f_S1),family = "NegBin1"))
+
+( f_S2 <- addSeason2formula(f = ~ 1, S = 1, period = 24))
+fit_id_2 <- hhh4(z.sts, control = list(ar = list(f = ~ t),end = list(f = f_S2),family = "NegBin1"))
+AIC(fit_id_1,fit_id_2)
+
+plot(fit_id_2,type="season")
+fitSim <- simulate(fit_id_2,nsim = 500, seed = 1,ystart=2005)
+ylab_id<-paste("Number of",i,"[cases]")
+plot(fitSim, "fan", means.args = list(), key.args = list(),ylab= ylab_id,ystart=2005)
+```
+
+
+
+```{r echo=FALSE}
+hhh4fit<-fit_id_2
+tab<-cbind(Estimate=summary(hhh4fit)$fixef[,1],confint(hhh4fit))
+knitr::kable(tab)
+```
+
+
+* The numer of cases was too small to detect the seasnoal pattern of rubella.
+
+```{r echo=FALSE, fig.height=5, fig.width=10}
+nsim <- 1000
+dat.raw<-data.frame(time=as.vector(time(dat_id_incidence)),
+                                 observed= dat_id)
+sims <- lapply(seq_len(nsim), function(i) {
+  data.frame(time = as.vector(time(dat_id_incidence)),
+             y = rnbinom(length(dat_id), mu = fitted(hhh4fit),
+                         size = exp(hhh4fit$coefficients[["-log(overdisp)"]])),
+             iteration = i)
+})
+
+tmp <- do.call(rbind, sims)
+
+p <- ggplot(tmp, aes(x=time,y=y)) + geom_fan() +scale_fill_gradient(low="red", high="yellow")+
+  theme_bw() + ylab(ylab_id)+geom_point(data=dat.raw,aes(x=time,y=observed))+geom_line(data=dat.raw,aes(x=time,y=observed))+  theme_bw() +
+  theme(panel.grid.minor = element_blank(),axis.title.x = element_text(face="bold", colour="black", size=15, margin = margin(t = 20,r = 20,b =20, l = 20)),
+        axis.title.y = element_text(face="bold", colour="black", size=15, margin = margin(t = 20,r = 20,b = 20, l = 20)),
+        axis.text.y = element_text( colour="black", size=15),
+        axis.text.x = element_text( colour="black", size=15),
+        axis.ticks.x=element_blank(),
+        legend.text = element_text(size = 15),
+        legend.title = element_blank(),
+        legend.key = element_rect(colour = NA),
+        strip.text=element_text(face = "bold",size=15)) +xlab("Year")#+scale_y_continuous(trans='sqrt')
+print(p)
+```
+
+
+
+
+
+
+
+
+
+### Streptococcus Suis
+
+```{r include=FALSE}
+i<-diseases_names[17]
+
+dat_id<-getid_(i,from="2005-01-01",to="2015-12-31") %>% filter(province=="Ho Chi Minh") %>% mutate(month=as.numeric(factor(month)))  %>% mutate(month.y=paste(year,month,sep=".")) 
+
+if(i=="rubella"){
+      year.start<-2011
+      month.start<-1
+      dat_id %<>% filter(year>=2011)
+  }else{
+      year.start<-dat_id$year[1]
+      month.start<-dat_id$month[1]
+}
+
+dat_id<-dat_id[,4]
+dat_id_incidence<-ts(dat_id,start=c(year.start, month.start), frequency = 12)
+  
+z.sts <- as(dat_id_incidence, "sts")
+plot(z.sts)
+( f_S1 <- addSeason2formula(f = ~ 1+t, S = 1, period = 12))
+fit_id_1 <- hhh4(z.sts, control = list(ar = list(f = ~ t),end = list(f = f_S1),family = "NegBin1"))
+
+( f_S2 <- addSeason2formula(f = ~ 1+t, S = 1, period = 6))
+fit_id_2 <- hhh4(z.sts, control = list(ar = list(f = ~ t),end = list(f = f_S2),family = "NegBin1"))
+AIC(fit_id_1,fit_id_2)
+
+plot(fit_id_2,type="season")
+fitSim <- simulate(fit_id_2,nsim = 500, seed = 1,ystart=2005)
+ylab_id<-paste("Number of",i,"[cases]")
+plot(fitSim, "fan", means.args = list(), key.args = list(),ylab= ylab_id,ystart=2005)
+```
+
+
+
+
+```{r echo=FALSE}
+hhh4fit<-fit_id_2
+tab<-cbind(Estimate=summary(hhh4fit)$fixef[,1],confint(hhh4fit))
+knitr::kable(tab)
+```
+
+
+* 
+
+```{r echo=FALSE, fig.height=5, fig.width=10}
+nsim <- 1000
+dat.raw<-data.frame(time=as.vector(time(dat_id_incidence)),
+                                 observed= dat_id)
+sims <- lapply(seq_len(nsim), function(i) {
+  data.frame(time = as.vector(time(dat_id_incidence)),
+             y = rnbinom(length(dat_id), mu = fitted(hhh4fit),
+                         size = exp(hhh4fit$coefficients[["-log(overdisp)"]])),
+             iteration = i)
+})
+
+tmp <- do.call(rbind, sims)
+
+p <- ggplot(tmp, aes(x=time,y=y)) + geom_fan() +scale_fill_gradient(low="red", high="yellow")+
+  theme_bw() + ylab(ylab_id)+geom_point(data=dat.raw,aes(x=time,y=observed))+geom_line(data=dat.raw,aes(x=time,y=observed))+  theme_bw() +
+  theme(panel.grid.minor = element_blank(),axis.title.x = element_text(face="bold", colour="black", size=15, margin = margin(t = 20,r = 20,b =20, l = 20)),
+        axis.title.y = element_text(face="bold", colour="black", size=15, margin = margin(t = 20,r = 20,b = 20, l = 20)),
+        axis.text.y = element_text( colour="black", size=15),
+        axis.text.x = element_text( colour="black", size=15),
+        axis.ticks.x=element_blank(),
+        legend.text = element_text(size = 15),
+        legend.title = element_blank(),
+        legend.key = element_rect(colour = NA),
+        strip.text=element_text(face = "bold",size=15)) +xlab("Year")#+scale_y_continuous(trans='sqrt')
+print(p)
+```
+
+
+
+
+
+
+
+
+
+In conclusison, there were some diseases was declined due to the good cover of vaccine (like diphteria, hepatitis) and increase the level of hygiene (like amoebiasis, shigella and typhoid) due to the rise of economics and public health. Beside there were a slight upward trend of encephalitis (may be related to global warming). Munmps is quite striking. There was reduction of reproduced number (may be related to vaccine coverage) but a increased in endemic component. And there was also an emergence of new infection like hfmd. In general, given the window time of 10 year from 2005-2015, the change is quite small. We think that the assumption that the level of exposure to infectious disease are constant with respect to this window of time 2005-2015. 
+
+
