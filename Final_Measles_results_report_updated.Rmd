@@ -1,0 +1,1420 @@
+---
+title: "Final results"
+author: "Nhat Le"
+date: "10/3/2019"
+output:
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = TRUE,
+	message = FALSE,
+	warning = FALSE
+)
+
+#rm(list = ls())
+source('Rfunctions_measles.R', echo = F)
+library(geepack)
+options(width = 200)
+set.seed(123456)
+data.raw <- as.data.frame(read_csv("Data/measa.csv")) %>% arrange(date.admit)
+knots.time.af.mv<-c(1/12,2/12,5/12,8/12,1,1.5,3)
+knots.age<-c(1/2,1,1.5,2,2.5,3,5)
+age.max<-7.5
+time.max<-5
+last.knots<-5
+
+start_time <- Sys.time()
+# data.total.main <- data.transformed(data.raw,option = 1,emigration.rate = 0,seed = 1234)
+# # end_time <- Sys.time()
+# # (time_consumed1<-end_time - start_time)
+# save(data.total.main,file = "Data/data_total_main.Rdata")
+load(file = "Data/data_total_main.Rdata")
+# do the main analysis with ar1 correlation strucrure
+data.total.main_2<-data.total.main %>% mutate(flag=1) %>% 
+                                       group_by(patid) %>% mutate(wave=cumsum(flag)) %>% ungroup() %>% as.data.frame()
+# Because we excluded 2 week after MeV after MeV infection, so we need to add one to the wave after MeV.
+data.total.main_2 %<>% mutate(wave=ifelse(period=="after",wave+1,wave)) 
+```
+
+
+### Descriptive analysis
+
+
+```{r eval=FALSE, include=FALSE}
+# Dont run this code. This code was run and saved the results
+data<-data.prepare(data.raw,option = 0,emigration.rate = 0,seed=1234)
+dat <- data %>% filter(time.ad.measles.to.ad>= -2*365) %>% 
+                mutate(period = factor(period,levels=c("measles","before", "after"),
+                         labels=c("Measles","2 years before MeV", "After MeV")),
+         patid.new = paste(patid,period,sep="."))
+first.index<-firstobs(dat$patid.new)
+dat.tmp<-data.frame(patid.new=unique(dat$patid.new),first.index=as.numeric(first.index))
+dat <- merge(dat,dat.tmp,by="patid.new",all.x = T) 
+dat <- arrange(dat,patid,date.admit,date.dis) 
+dat$id <- ifelse(as.numeric(rownames(dat))==dat$first.index,1,0)
+
+covariates<-c("id","sex")
+dat.one<-subset(dat,id == 1)
+tab1<-mySummary.allvar(blvars=dat.one[,covariates],group=dat.one$period,contSummary="med.IQR",pval.comparison=F)
+tab1[3,1]<-"Number of patients"
+tab1 <- tab1[-4,]
+
+covariates <- c("age","outcome")
+tab2 <- mySummary.allvar(blvars=dat[,covariates],group=dat$period,contSummary="med.IQR",pval.comparison=F)
+tab <- rbind(tab1,tab2[-c(1,2),])[-1,]
+colnames(tab) <- tab2[1,]
+save(tab,file = "Results/Final/tab.Rdata")
+
+# Summary of reason for hospital admission
+index.data<-icd10cm2016
+index.data %<>% mutate(flag=1) %>% group_by(three_digit,major,sub_chapter,chapter) %>% dplyr::summarise(c=sum(flag)) %>% ungroup()
+index.data<-index.data[,-5]
+index.data<-rbind(index.data,data.frame(three_digit="A16",major="Respiratory tuberculosis",sub_chapter="Tuberculosis",chapter="Certain infectious and parasitic diseases"))
+index.data %<>% arrange(three_digit,major,sub_chapter,chapter) %>% mutate(major = as.factor(major),
+                                                                          sub_chapter = as.factor(sub_chapter),
+                                                                          chapter = as.factor(chapter))
+index.data$type_ID<-ifelse(index.data$three_digit%in%c("B57","B55","B56","B65","B77","B76","B79","B73","B68","B69","B67","B74","B72","B66","B92","A30","A71","A31","A66","A67","A65","A82","A90","A91"),"NTD","no NTD")
+##### Add the age group here.
+dat <- data %>% filter(time.ad.measles.to.ad>= -2*365 & period!="measles") %>% 
+  mutate(period.new = ifelse(time.ad.measles.to.ad>365,">1 year after MeV",as.character(period)),
+         age.group=factor(ifelse(age>=5,"5-15 years old","<5 years old")))%>% 
+  mutate(period = factor(period.new,levels=c("measles","before", "after",">1 year after MeV"),
+                         labels=c("Measles","2 years before MeV", "0-1 year after MeV",">1 year after MeV")),
+         patid.new = paste(patid,period,sep="."),
+         period = droplevels(period),
+         three_digit = icd.m3,
+         flag = 1)
+dat.new<-merge(dat,index.data,by="three_digit")
+
+dat.new %<>% mutate(major=as.character(major),major=ifelse(major %in% c("Dengue fever [classical dengue]",
+                                 "Dengue hemorrhagic fever"),"Dengue",major),
+                    major=ifelse(major %in% c("Respiratory tuberculosis",
+                                 "Tuberculosis of nervous system"),"Tuberculosis",major),
+                    age.period=paste(period,age.group,sep="&"))
+
+dat.sum<-dat.new %>% group_by(age.period,major,sub_chapter,type_ID) %>% dplyr::summarise(cases=sum(flag,na.rm=T)) %>%
+                     arrange(cases,major) %>% ungroup()
+dat.sum_wide <- spread(dat.sum, key="age.period",value="cases")
+dat.sum_wide$major<-as.character(dat.sum_wide$major)
+dat.sum_wide$major<-ifelse(dat.sum_wide$major=="Measles","Measles complicated",dat.sum_wide$major)
+dat.sum_wide<-as.data.frame(dat.sum_wide)
+dat.sum_wide$major<-factor(dat.sum_wide$major,levels=c("Amebiasis", "Shigellosis",      "Infectious gastroenteritis and colitis, unspecified",        
+"Other bacterial intestinal infections",   
+"Tuberculosis",
+"Whooping cough",  
+"Other sepsis",                                               
+"Viral meningitis",                                           
+"Dengue",                                                     
+"Unspecified viral hemorrhagic fever",                        
+"Measles complicated",                                        
+"Varicella [chickenpox]"                                     ,
+"Zoster [herpes zoster]"                                     ,
+"Oth viral infect with skin and mucous membrane lesions, NEC",
+"Unsp viral infection with skin and mucous membrane lesions" ,
+"Cytomegaloviral disease"                                    ,
+"Mumps"                                                      ,
+"Viral conjunctivitis"                                       ,
+"Viral infection of unspecified site"                        ,
+"Candidiasis"                                                ,
+"Bacterial meningitis, not elsewhere classified"             ,
+"Encephalitis, myelitis and encephalomyelitis"               ,
+"Meningitis in oth infec/parastc diseases classd elswhr"     ,
+"Sequelae of inflammatory diseases of central nervous system",
+"Acute laryngitis and tracheitis"                            ,
+"Acute nasopharyngitis [common cold]"                        ,
+"Acute pharyngitis"                                          ,
+"Acute sinusitis"                                            ,
+"Acute tonsillitis"                                          ,
+"Acute upper resp infections of multiple and unsp sites"     ,
+"Bacterial pneumonia, not elsewhere classified"              ,
+"Influenza due to other identified influenza virus"          ,
+"Pneumonia due to Streptococcus pneumoniae"                  ,
+"Pneumonia, unspecified organism"                            ,
+"Acute bronchiolitis"                                        ,
+"Acute bronchitis",
+"Other and unspecified infectious diseases"                  ))
+dat.sum_wide <- arrange(dat.sum_wide,sub_chapter,major)
+dat.sum_wide %<>% dplyr::rename("above1_year_after_MeV_below5_year_old"=">1 year after MeV&<5 years old",
+                                "above1_year_after_MeV_5to15_years_old"=">1 year after MeV&5-15 years old",
+                                "below1_year_after_MeV_below5_years_old"="0-1 year after MeV&<5 years old",
+                                "below1_year_after_MeV_5to15_years_old"="0-1 year after MeV&5-15 years old",
+                                "two_years_before_MeV_below5_years_olds"="2 years before MeV&<5 years old",
+                                "two_years_before_MeV_5to15_years_old"="2 years before MeV&5-15 years old") 
+dat.sum_wide %<>% select(c("major","sub_chapter","type_ID","two_years_before_MeV_below5_years_olds","two_years_before_MeV_5to15_years_old",
+                           "below1_year_after_MeV_below5_years_old","below1_year_after_MeV_5to15_years_old",
+                           "above1_year_after_MeV_below5_year_old","above1_year_after_MeV_5to15_years_old") )
+
+dat.sum_wide %<>%mutate(above1_year_after_MeV_below5_year_old=ifelse(is.na(above1_year_after_MeV_below5_year_old),0,above1_year_after_MeV_below5_year_old),
+                        above1_year_after_MeV_5to15_years_old=ifelse(is.na(above1_year_after_MeV_5to15_years_old),0,above1_year_after_MeV_5to15_years_old),
+                        below1_year_after_MeV_below5_years_old=ifelse(is.na(below1_year_after_MeV_below5_years_old),0,below1_year_after_MeV_below5_years_old),
+                        below1_year_after_MeV_5to15_years_old=ifelse(is.na(below1_year_after_MeV_5to15_years_old),0,below1_year_after_MeV_5to15_years_old),
+                        two_years_before_MeV_below5_years_olds=ifelse(is.na(two_years_before_MeV_below5_years_olds),0,two_years_before_MeV_below5_years_olds),
+                        two_years_before_MeV_5to15_years_old=ifelse(is.na(two_years_before_MeV_5to15_years_old),0,two_years_before_MeV_5to15_years_old))
+dat.sum_wide <- arrange(dat.sum_wide,sub_chapter,desc(two_years_before_MeV_below5_years_olds),desc(two_years_before_MeV_5to15_years_old),major)
+save(dat.sum_wide,file = "Results/Final/dat_sum_wide.Rdata")
+```
+
+
+#### Table 1. Summary of demographics and baseline characteristics of hospital admission of the study population
+
+```{r tab1, echo=FALSE, results="asis"}
+load(file = "Results/Final/tab.Rdata")
+knitr::kable(tab)
+```
+
+*N* is the number of hospital admissions.
+* Please, remove the dominator number in the table!
+
+
+#### Table S1: Summary table of reason for hospital admission
+
+```{r tabS1, echo=FALSE,results = "asis"}
+# colnames(dat.sum_wide)<-c("Reason for hospital admission","Type of infections","Type_ID","2 years pre-MeV", "1 year post-MeV","> 1 year post-MeV")
+# save(dat.sum_wide,file = "Results/Final/dat_sum_wide.Rdata")
+load(file = "Results/Final/dat_sum_wide.Rdata")
+knitr::kable(dat.sum_wide)
+```
+
+
+
+
+#### Figure 1: Hospital admissions by the current age and by time after measles.  
+
+```{r echo=FALSE, fig.height=9, fig.width=9, message=FALSE, warning=FALSE}
+library(ggExtra)
+set.seed(12321)
+
+load(file = "Data/data_total_main.Rdata")
+
+dat.tmp2<-data.total.main %>% arrange(patid,age.at.infection) %>% mutate(period=factor(period,levels=c("before","after")))
+
+dat.tmp2$time.after.mv<-ifelse(dat.tmp2$period=="before",dat.tmp2$age.at.infection-dat.tmp2$age.at.measles.y,dat.tmp2$time.after.mv)
+
+dat.totaltime <- dat.tmp2 %>% group_by(patid,age.at.measles.y) %>% dplyr::summarise(tstart=min(time.after.mv),age.start=min(age.at.infection),tstop=max(time.after.mv),age.stop=max(age.at.infection),.groups="keep") %>% ungroup() %>% as.data.frame()
+
+
+dat.event<-dat.tmp2 %>% filter(status==1)
+dat.totaltime.sample<-dat.totaltime[sample(1:nrow(dat.totaltime),20),]
+
+library(cowplot) 
+# Main plot
+theme_set(theme_bw())
+
+pmain<-ggplot(data=dat.totaltime, aes(group=patid))+
+geom_segment(aes(x = age.start, y = tstart, xend = age.stop, yend =tstop),col=grey(0.95))+
+geom_segment(data=dat.totaltime.sample, aes(x = age.start,y=tstart, xend = age.stop, yend =tstop),col=grey(0.1))+
+  
+  geom_point(data=dat.event, aes(x=age.at.infection,y=time.after.mv,colour=period),shape=15,size=0.5)+scale_color_manual(name = "Period",values=c("#756bb1","#f03b20"),labels=c("Before MeV","After MeV"))+
+  theme(axis.title.x = element_text(face="bold", colour="black", size=15, margin = margin(t = 0,r = 0,b =0, l = 0)),
+        axis.title.y = element_text(face="bold", colour="black", size=15, margin = margin(t = 0,r = 0,b =0, l = 0)),
+        axis.text.y = element_text( colour="black", size=15),
+        axis.text.x = element_text( colour="black", size=15),
+        legend.text = element_text(face="bold", colour="black", size=10),
+        legend.title = element_text( face="bold",colour="black", size=12),
+        #legend.position = "none",
+        strip.text=element_text(face = "bold",size=15))+
+  scale_x_continuous("Age [years]",limits =c(0,15),breaks=seq(0,15,by=3) )+scale_y_continuous("Time relative to measles hospitalization [years]",breaks =c(-2,-1,0,1:10),limits = c(-2,10))+ guides(size = T,color = guide_legend(override.aes = list(size = 6)))+  theme(legend.position="bottom")
+xdens <- axis_canvas(pmain, axis = "x")+
+  geom_density(data = dat.tmp2, aes(x = age.at.infection,stat(count), fill = period),
+               alpha = 0.7, size = 0.3,trim=T)+scale_fill_manual( values = c("#756bb1","#f03b20"))
+# Marginal densities along y axis 
+# Need to set coord_flip = TRUE, if you plan to use coord_flip()
+ydens <- axis_canvas(pmain, axis = "y", coord_flip = TRUE)+
+  geom_density(data = dat.tmp2, aes(x = time.after.mv,stat(count), fill = period),
+               alpha = 0.7, size = 0.3,trim=T)+scale_fill_manual( values = c("#756bb1","#f03b20"))+
+  coord_flip()
+
+p1 <- insert_xaxis_grob(pmain, xdens, grid::unit(.2, "null"), position = "top")
+p2 <- insert_yaxis_grob(p1, ydens, grid::unit(.2, "null"), position = "right")
+ggdraw(p2)
+ggsave(file = "Results/Final/Figures/Figure1.png",   # The directory you want to save the file in
+    width = 7, # The width of the plot in inches
+    height = 8, dpi=450) # The height of the plot in inches
+```
+
+
+## Main analysis
+
+```{r message=FALSE, warning=FALSE, include=FALSE, paged.print=TRUE}
+# start_time <- Sys.time()
+# data.total.main <- data.transformed(data.raw,option = 1,emigration.rate = 0,seed = 1234)
+# # end_time <- Sys.time()
+# # (time_consumed1<-end_time - start_time)
+# save(data.total.main,file = "C:/Users/nhatlth/OneDrive/Measles_paper/Final Paper/Project_Measles_18EN/R-codes/Data/data_total_main.Rdata")
+# load(file = "C:/Users/nhatlth/OneDrive/Measles_paper/Final Paper/Project_Measles_18EN/R-codes/Data/data_total_main.Rdata")
+load(file = "Data/data_total_main.Rdata")
+```
+
+
+```{r eval=FALSE, include=FALSE}
+start_time <- Sys.time()
+fit.gee.main_ar1<- geeglm(status~ sex + ns(age.at.infection,kn=knots.age,Bo = c(0,age.max))+I(time.after.mv>=14/365)+
+             ns(pmax(time.after.mv-14/365,0),kn=knots.time.af.mv-14/365,Bo = c(0,time.max-14/365)),id=patid,corstr="ar1",family=poisson(link = "log"),data = data.total.main_2,offset=offset_time,waves=wave)
+end_time <- Sys.time()
+(time_consumed1<-end_time - start_time)
+save(fit.gee.main_ar1,file="Results/Final/fit_gee_main_ar1.Rdata")
+```
+
+
+* We fit the Poisson marginal model with cluster (patient), the current age (age.at.infection) and time after MeV
+
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+load(file="Results/Final/fit_gee_main_ar1.Rdata")
+time.after.mv<-seq(2/52,10,by=0.01)
+l<-length(time.after.mv)
+mat<-as.matrix(ns(pmax(time.after.mv-14/365,0),kn=knots.time.af.mv-14/365,Bo = c(0,time.max-14/365))-matrix(rep(ns(0,kn=knots.time.af.mv-14/365,Bo = c(0,time.max-14/365)),each=l),nrow=l))
+mat<-cbind(matrix(rep(rep(0,10),l),ncol=10),rep(1,l),mat)
+pred<- my.ci.lin(fit.gee.main_ar1, mat, Exp=F) 
+dat<-data.frame(time.after.mv=seq(2/52,10,by=0.01),age.at.infection=0,offset_time=0)
+dat$pred<-pred[,1]
+dat$plo<-pred[,5]
+dat$phi<-pred[,6]
+```
+
+```{r eval=FALSE, message=FALSE, warning=FALSE, include=FALSE}
+load(file="Results/Final/fit_gee_main_ar1.Rdata")
+Time.est<-Time_estimate(fit.gee.main_ar1,interval = c(2/52,1.5),knots=knots.time.af.mv,time.max=5)
+```
+
+
+
+```{r message=FALSE, warning=FALSE, include=FALSE, paged.print=FALSE}
+#Make the interpreation table of the regression
+time.after.mv<-c(14/365,21/365,30.4/365,60.8/365,90.25/365,182.5/365,273.8/365,1,1.5,2,3,4,5,5.5,6)
+l<-length(time.after.mv)
+mat<-as.matrix(ns(pmax(time.after.mv-14/365,0),kn=knots.time.af.mv-14/365,Bo = c(0,time.max-14/365))-matrix(rep(ns(0,kn=knots.time.af.mv-14/365,Bo = c(0,time.max-14/365)),each=l),nrow=l))
+mat<-cbind(matrix(rep(rep(0,10),l),ncol=10),rep(1,l),mat)
+
+pred<- my.ci.lin(fit.gee.main_ar1, mat, Exp=TRUE) 
+IRR.tab<-data.frame(time.after.mv=c(14/365,21/365,30.4/365,60.8/365,90.25/365,182.5/365,273.8/365,1,1.5,2,3,4,5,5.5,6),age.at.infection=0,offset_time=0)
+IRR.tab$pred<-pred[,5]
+IRR.tab$plo<-pred[,6]
+IRR.tab$phi<-pred[,7]
+IRR.tab$time.after.mv <- c("2 weeks","3 weeks","1 month","2 months","3 months","6 months","9 months", "1 year","1.5 year","2 years","3 years","4 years","5 years","5.5 years","6 years")
+IRR.tab$IRR <- paste(round(IRR.tab$pred,2),"95% CI(",round(IRR.tab$plo,2),",",round(IRR.tab$phi,2),")")
+IRR.tab <- IRR.tab[,c("time.after.mv","IRR")]
+colnames(IRR.tab) <- c("Time after measles","Incidence rate ratio(95% CI)")
+```
+
+#### Table 2: Incidence rate ratio of hospital admission due to non-measles infectious disease between post-measles and pre-measles by time after measles 
+
+```{r tab2, echo=FALSE, results='asis'}
+knitr::kable(IRR.tab)
+```
+
+
+#### Figure 2B: Incidence rate ratio of hospital admission due to non-measles infectious disease post vs. 2 year pre-measles 
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+p<-ggplot(dat,aes(x=time.after.mv, y=pred)) + geom_line(size=.75,color="#31a354")+
+  geom_ribbon(data=dat,aes(ymin=plo, ymax=phi, x=time.after.mv), alpha = 0.3,fill="#31a354") +
+  scale_y_continuous("IRR relative to before measles",breaks = log(c(1/50,1/20,1/8,1/3,1,3,8,50)),labels=c(expression(1/50),expression(1/20),expression(1/8),expression(1/3),1,3,8,50))+
+  scale_x_continuous("Time after measles infection [years]",limits = c(0,10),breaks=c(0,1:10),labels=c("0",1:10))+
+  geom_hline(yintercept=0, linetype="dashed", color = "black")+
+  theme_bw() +
+  theme(panel.grid.minor = element_blank(),axis.title.x = element_text(face="bold", colour="black", size=15, margin = margin(t = 20,r = 20,b =20, l = 20)),
+        axis.title.y = element_text(face="bold", colour="black", size=15, margin = margin(t = 20,r = 20,b = 20, l = 20)),
+        axis.text.y = element_text( colour="black", size=15),
+        axis.text.x = element_text( colour="black", size=15),
+        axis.ticks.x=element_blank(),
+        legend.text = element_text(size = 15),
+        legend.title = element_blank(),
+        legend.key = element_rect(colour = NA),
+
+        strip.text=element_text(face = "bold",size=15))  + coord_cartesian(ylim=c(-4,2),xlim=c(0,6)) 
+ggsave(file = "Results/Final/Figures/Figure2B.png",   
+    width = 7, 
+    height = 8, dpi=450) 
+p
+
+
+```
+
+
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+load(file="Results/Final/fit_gee_main_ar1.Rdata")
+dat1<-data.frame(age.at.infection=rep(seq(0,10,by=0.01),2),time.after.mv=-1,offset_time=0,sex=rep(c("male","female"),each=length(seq(0,10,by=0.01))))
+dat1<-pred.gee(fit.gee.main_ar1,newdata=dat1)
+dat2<-data.frame(age.at.infection=rep(seq(0,10,by=0.01),2)+2/52,time.after.mv=2/52,offset_time=0,sex=rep(c("male","female"),each=length(seq(0,10,by=0.01))))
+dat2<-pred.gee(fit.gee.main_ar1,newdata=dat2)
+dat3<-data.frame(age.at.infection=rep(seq(0,10,by=0.01),2)+30/365,time.after.mv=30/365,offset_time=0,sex=rep(c("male","female"),each=length(seq(0,10,by=0.01))))
+dat3<-pred.gee(fit.gee.main_ar1,newdata=dat3) 
+dat4<-data.frame(age.at.infection=rep(seq(0,10,by=0.01),2)+2,time.after.mv=2,offset_time=0,sex=rep(c("male","female"),each=length(seq(0,10,by=0.01))))
+dat4<-pred.gee(fit.gee.main_ar1,newdata=dat4)
+dat5<-data.frame(age.at.infection=rep(seq(0,10,by=0.01),2)+4,time.after.mv=4,offset_time=0,sex=rep(c("male","female"),each=length(seq(0,10,by=0.01))))
+dat5<-pred.gee(fit.gee.main_ar1,newdata=dat5)
+dat6<-data.frame(age.at.infection=rep(seq(0,10,by=0.01),2)+6,time.after.mv=6,offset_time=0,sex=rep(c("male","female"),each=length(seq(0,10,by=0.01))))
+dat6<-pred.gee(fit.gee.main_ar1,newdata=dat6)
+dat<-rbind(dat1,dat2,dat3,dat4,dat5,dat6)
+dat$time.after.mv<-factor(dat$time.after.mv,labels=c("pre-MeV","2 weeks after MeV","1 month post-MeV","2 years post-MeV","4 years post-MeV","6 years post-MeV"))
+dat$sex<-factor(dat$sex,levels=c("male","female"),labels=c("Male","Female"))
+
+```
+
+#### Figure 2A: Incidence of hopistal admission by age before MeV
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+p<-ggplot(dat,aes(x=age.at.infection, y=pred,group=time.after.mv,fill=time.after.mv)) + geom_line(aes(size=time.after.mv,color=time.after.mv))+facet_wrap(~sex)+
+  geom_ribbon(aes(ymin=plo, ymax=phi), alpha = 0.1,linetype=0)+coord_cartesian(ylim=c(-8,1)) +
+  scale_y_continuous("Incidence rate of hospital admission [cases/person-year]",breaks = log(c(1/6500,1/2000,1/750,1/250,1/80,1/30,1/10,1/3,1,3)),
+                     labels=c(expression(1/6500),expression(1/2000),expression(1/750),expression(1/250),expression(1/80),expression(1/30),expression(1/10),expression(1/3),expression(1),expression(3)))+
+  scale_x_continuous("Age [years]",limits = c(0,10),breaks=c(0,1:10),labels=c("0",1:10))+
+  theme_bw() +
+  theme(panel.grid.minor = element_blank(),axis.title.x = element_text(face="bold", colour="black", size=15, margin = margin(t = 20,r = 20,b =20, l = 20)),
+        axis.title.y = element_text(face="bold", colour="black", size=15, margin = margin(t = 20,r = 20,b = 20, l = 20)),
+        axis.text.y = element_text( colour="black", size=15),
+        axis.text.x = element_text( colour="black", size=15),
+        axis.ticks.x=element_blank(),
+        legend.text = element_text(size = 15),
+        legend.title = element_blank(),
+        legend.key = element_rect(colour = NA),
+        strip.text=element_text(face = "bold",size=15))+scale_fill_manual(values=c("#ffeda0","#de2d26", "#31a354","#386cb0","#c51b8a","black"))+scale_colour_manual(values=c("#ffeda0","#de2d26", "#31a354","#386cb0","#c51b8a","black"))+scale_size_manual(values=c(2.5,rep(1,5)))
+p
+ggsave(file = "Results/Final/Figures/Figure2A.png",   
+    width = 15, 
+    height = 8, dpi=450) 
+
+```
+
+#### Figure 2C: Incidence rate difference  of hopistal admission post-MeV vs. pre-MeV by age.
+
+
+```{r include=FALSE}
+dat.tmp<-subset(data.total.main,status==1)
+time<-max(dat.tmp$time.after.mv)
+```
+
+* The last event time after MeV is `r time`, it means that after 6 years there were no event. Therefore all the estimate after this time point is an extrapolation which is very sensitive with the boundary knots and the location of the knots after 6. Therefore in the main analysis, we only show the IRR by time upto 6 after MeV admission.
+
+
+
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+load(file="Results/Final/fit_gee_main_ar1.Rdata")
+dat2<-data.frame(age.at.infection=rep(seq(0,10,by=0.01),2)+2/52,time.after.mv=2/52,offset_time=0,sex=rep(c("male","female"),each=length(seq(0,10,by=0.01))))
+dat2<-pred.gee.diff(fit.gee.main_ar1,newdata=dat2)
+#dat2<-pred.gee.diff_msm(fit.gee.main_ar1,newdata=dat2)# This function use delta.method function in the  msm package to check if the delta method which I implemented pred.gee.diff give the same answer. And yes  it does.
+
+dat3<-data.frame(age.at.infection=rep(seq(0,10,by=0.01),2)+30/365,time.after.mv=30/365,offset_time=0,sex=rep(c("male","female"),each=length(seq(0,10,by=0.01))))
+dat3<-pred.gee.diff(fit.gee.main_ar1,newdata=dat3) 
+
+dat4<-data.frame(age.at.infection=rep(seq(0,10,by=0.01),2)+2,time.after.mv=2,offset_time=0,sex=rep(c("male","female"),each=length(seq(0,10,by=0.01))))
+dat4<-pred.gee.diff(fit.gee.main_ar1,newdata=dat4)
+
+dat5<-data.frame(age.at.infection=rep(seq(0,10,by=0.01),2)+4,time.after.mv=4,offset_time=0,sex=rep(c("male","female"),each=length(seq(0,10,by=0.01))))
+dat5<-pred.gee.diff(fit.gee.main_ar1,newdata=dat5)
+
+dat6<-data.frame(age.at.infection=rep(seq(0,10,by=0.01),2)+6,time.after.mv=6,offset_time=0,sex=rep(c("male","female"),each=length(seq(0,10,by=0.01))))
+dat6<-pred.gee.diff(fit.gee.main_ar1,newdata=dat6)
+dat<-rbind(dat2,dat3,dat4,dat5,dat6)
+dat$time.after.mv<-factor(dat$time.after.mv,labels=c("2 weeks after MeV","1 month post-MeV","2 years post-MeV","4 years post-MeV","6 years post-MeV"))
+dat$sex<-factor(dat$sex,levels=c("male","female"),labels=c("Male","Female"))
+
+```
+
+
+```{r echo=FALSE, fig.height=5, fig.width=12, message=FALSE, warning=FALSE, paged.print=FALSE}
+p<-ggplot(dat,aes(x=age.at.infection, y=absolute_diff,group=time.after.mv,fill=time.after.mv)) + geom_line(size=.8,aes(color=time.after.mv))+facet_wrap(~sex)+
+  geom_ribbon(aes(x=age.at.infection,ymin=absolute_diff_lo, ymax=absolute_diff_high), alpha = 0.5,linetype=0)+coord_cartesian(ylim=c(-0.25,2)) +
+  scale_y_continuous("Incidence rate difference of hospital admission post-MeV vs pre-MeV \n [cases/person year]",breaks=seq(-0.5,2,by=0.25))+
+  scale_x_continuous("Age [years]",limits = c(0,10),breaks=c(0,1:15),labels=c("0",1:15))+
+  theme_bw() +
+  theme(panel.grid.minor = element_blank(),axis.title.x = element_text(face="bold", colour="black", size=15, margin = margin(t = 20,r = 20,b =20, l = 20)),
+        axis.title.y = element_text(face="bold", colour="black", size=15, margin = margin(t = 20,r = 20,b = 20, l = 20)),
+        axis.text.y = element_text(colour="black", size=15),
+        axis.text.x = element_text( colour="black", size=15),
+        axis.ticks.x=element_blank(),
+        legend.text = element_text(size = 15),
+        legend.title = element_blank(),
+        legend.key = element_rect(colour = NA),
+        strip.text=element_text(face = "bold",size=15))+scale_fill_manual(values=c("#2ca25f","#de2d26", "#8856a7","#43a2ca","#feb24c","#636363"))+scale_colour_manual(values=c("#2ca25f","#de2d26", "#8856a7","#43a2ca","#feb24c","#636363"))
+ggsave(file = "Results/Final/Figures/Figure2C.png",   
+    width = 15, 
+    height = 8, dpi=450) 
+p
+```
+
+
+
+### Analysis with Interaction with age and sex and time since measles
+
+
+```{r eval=FALSE, message=FALSE, warning=FALSE, include=FALSE, paged.print=TRUE}
+start_time <- Sys.time()
+fit.gee.interaction.overall <- geeglm(status~ sex+ ns(age.at.infection,kn=knots.age,Bo = c(0,age.max))+I(time.after.mv>=14/365)+
+                                        ns(pmax(time.after.mv-14/365,0),kn=knots.time.af.mv-14/365,Bo = c(0,time.max-14/365))+
+                                        
+                                        ns(age.at.infection,kn=c(1.5),Bo = c(0,age.max)):ns(pmax(time.after.mv-14/365,0),kn=c(0.5)-14/365,Bo = c(0,time.max-14/365))+
+                                        ns(age.at.infection,kn=knots.age,Bo = c(0,age.max)):sex+
+                                        ns(pmax(time.after.mv-14/365,0),kn=knots.time.af.mv-14/365,Bo = c(0,time.max-14/365)):sex,
+                                      id=patid,corstr="ar1",family=poisson(link = "log"),data = data.total.main_2,offset=offset_time,waves=wave)
+end_time <- Sys.time()
+(time_consumed1<-end_time - start_time)
+save(fit.gee.interaction.overall,file="Results/Final/fit_gee_interaction_overall_ar1.Rdata")
+```
+
+
+
+
+```{r include=FALSE}
+# load("Results/Final/fit_gee_interaction_overall_ar1.Rdata")
+# ano_interact_overall<-anova(fit.gee.interaction.overall,"ns(age.at.infection, kn = c(1.5), Bo = c(0, age.max)):ns(pmax(time.after.mv -   14/365, 0), kn = c(0.5) - 14/365, Bo = c(0, time.max -
+#     14/365)) + ns(age.at.infection, kn = knots.age, Bo = c(0,
+#     age.max)):sex + ns(pmax(time.after.mv - 14/365, 0), kn = knots.time.af.mv -
+#     14/365, Bo = c(0, time.max - 14/365)):sex")
+# save(ano_interact_overall,file="Results/Final/ano_interact_overall_compare_ar1.Rdata")
+
+load(file="Results/Final/ano_interact_overall_compare_ar1.Rdata")
+p.val.overall<-1-pchisq(sum(ano_interact_overall$X2[5:7]),df=sum(ano_interact_overall$Df[5:7]))
+p.val.age.time<-ano_interact_overall$`P(>|Chi|)`[5]
+p.val.sex.age<-ano_interact_overall$`P(>|Chi|)`[6]
+p.val.sex.time<-ano_interact_overall$`P(>|Chi|)`[7]
+p.val.non.linear_time<-ano_interact_overall$`P(>|Chi|)`[3]
+```
+
+
+
+
+* overall p.value= `r round(p.val.overall,3)`,  p-value testing for interaction between age and time after MeV `r round(p.val.age.time,3)`; between age and sex `r round(p.val.sex.age,3)` and between time after MeV and sex  `r round(p.val.sex.time,3)`
+
+## Senstivity analysis
+### Analysis 1
+ In this analysis, we allowed all patients who went home with discharge with presumably worse condition as alive.
+ 
+```{r eval=FALSE, include=FALSE}
+start_time <- Sys.time()
+data.total.worse <- data.transformed(data.raw,option = 0,emigration.rate = 0,seed = 1234)
+end_time <- Sys.time()
+save(data.total.worse,file = "Data/data_total_worse_ar1.Rdata")
+
+data.total.worse_2 <- data.total.worse %>% mutate(flag=1) %>% 
+                                           group_by(patid) %>% 
+                                           mutate(wave=cumsum(flag)) %>% 
+                                           ungroup() %>% as.data.frame()
+
+data.total.worse_2 %<>% mutate(wave=ifelse(period=="after",wave+1,wave)) 
+
+## We fit the Poisson regression mixed effect model with patient is a random intercept, the current age (age.at.infection) and time after MeV (time.after.mv) 
+## are the main covariates.
+start_time <- Sys.time()
+fit.gee.worse<- geeglm(status~ sex+ ns(age.at.infection,kn=knots.age,Bo = c(0,age.max))+I(time.after.mv>=14/365)+
+             ns(pmax(time.after.mv-14/365,0),kn=knots.time.af.mv-14/365,Bo = c(0,time.max-14/365)),
+                              id=patid,corstr="ar1",family=poisson(link = "log"),data = data.total.worse_2,offset=offset_time,waves=wave)
+
+end_time <- Sys.time()
+(time_consumed1<-end_time - start_time)
+save(fit.gee.worse,file="Results/Final/fit_gee_worse_ar1.Rdata")
+```
+
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+load(file="Results/Final/fit_gee_worse_ar1.Rdata")
+time.after.mv<-seq(2/52,6,by=0.01)
+l<-length(time.after.mv)
+mat<-as.matrix(ns(pmax(time.after.mv-14/365,0),kn=knots.time.af.mv-14/365,Bo = c(0,time.max-14/365))-matrix(rep(ns(0,kn=knots.time.af.mv-14/365,Bo = c(0,time.max-14/365)),each=l),nrow=l))
+mat<-cbind(matrix(rep(rep(0,10),l),ncol=10),rep(1,l),mat)
+pred<- my.ci.lin(fit.gee.worse, mat, Exp=F) 
+dat<-data.frame(time.after.mv=seq(2/52,6,by=0.01),age.at.infection=0,offset_time=0)
+dat$pred<-pred[,1]
+dat$plo<-pred[,5]
+dat$phi<-pred[,6]
+
+```
+
+#### Figure S1: Incidence rate ratio of hospital admission due to non-measles infectious disease post vs. 2 year pre-measles with patient outcome discharge with presumably worse condition were considered alive.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+p<-ggplot(dat,aes(x=time.after.mv, y=pred)) + geom_line(size=.75,color="#31a354")+
+  geom_ribbon(data=dat,aes(ymin=plo, ymax=phi, x=time.after.mv), alpha = 0.3,fill="#31a354")+coord_cartesian(ylim=c(-3,4)) +
+  scale_y_continuous("IRR relative to before measles",breaks = log(c(1/20,1/8,1/3,1,3,8,50)),labels=c("1/20","1/8","1/3",1,3,8,50))+
+  scale_x_continuous("Time after measles infection [years]",limits = c(0,10),breaks=c(0,1:10),labels=c("0",1:10))+
+  geom_hline(yintercept=0, linetype="dashed", color = "black")+
+  theme_bw() +
+  theme(panel.grid.minor = element_blank(),axis.title.x = element_text(face="bold", colour="black", size=12, margin = margin(t = 20,r = 20,b =20, l = 20)),
+        axis.title.y = element_text(face="bold", colour="black", size=15, margin = margin(t = 20,r = 20,b = 20, l = 20)),
+        axis.text.y = element_text(colour="black", size=15),
+        axis.text.x = element_text( colour="black", size=15),
+        axis.ticks.x=element_blank(),
+        legend.text = element_text(size = 15),
+        legend.title = element_blank(),
+        legend.key = element_rect(colour = NA),
+        strip.text=element_text(face = "bold",size=15))  + coord_cartesian(ylim=c(-4,2),xlim=c(0,6)) 
+ggsave(file = "Results/Final/Figures/Supplementary Figures/S1_Figure.png",   
+    width = 7, 
+    height = 8, dpi=450) 
+p
+```
+
+
+
+
+```{r eval=FALSE, message=FALSE, warning=FALSE, include=FALSE}
+load(file="Results/Final/fit_gee_worse_ar1.Rdata")
+#Time.est<-Time_estimate(fit.gee,interval = c(2/52,1.5),knots=knots.time.af.mv,time.max=9.8)
+
+```
+
+
+
+```{r eval=FALSE, message=FALSE, warning=FALSE, include=FALSE, paged.print=FALSE}
+#Make the interpreation table of the regression
+load(file="Results/Final/fit_gee_worse_ar1.Rdata")
+time.after.mv<-c(14/365,21/365,30.4/365,60.8/365,90.25/365,182.5/365,273.8/365,1,1.5,2,3,4,5,5.5,6)
+l<-length(time.after.mv)
+mat<-as.matrix(ns(pmax(time.after.mv-14/365,0),kn=knots.time.af.mv-14/365,Bo = c(0,time.max-14/365))-matrix(rep(ns(0,kn=knots.time.af.mv-14/365,Bo = c(0,time.max-14/365)),each=l),nrow=l))
+mat<-cbind(matrix(rep(rep(0,10),l),ncol=10),rep(1,l),mat)
+
+pred<- my.ci.lin(fit.gee.worse, mat, Exp=TRUE) 
+IRR.tab<-data.frame(time.after.mv=c(14/365,21/365,30.4/365,60.8/365,90.25/365,182.5/365,273.8/365,1,1.5,2,3,4,5,5.5,6),age.at.infection=0,offset_time=0)
+IRR.tab$pred<-pred[,5]
+IRR.tab$plo<-pred[,6]
+IRR.tab$phi<-pred[,7]
+IRR.tab$time.after.mv <- c("2 weeks","3 weeks","1 month","2 months","3 months","6 months","9 months", "1 year","1.5 year","2 years","3 years","4 years","5 years","5.5 years","6 years")
+IRR.tab$IRR <- paste(round(IRR.tab$pred,2),"95% CI(",round(IRR.tab$plo,2),",",round(IRR.tab$phi,2),")")
+IRR.tab <- IRR.tab[,c("time.after.mv","IRR")]
+colnames(IRR.tab) <- c("Time after measles","Incidence rate ratio(95% CI)")
+save(IRR.tab,file = "Results/Final/IRR_tab_worse_ar1.Rdata")
+
+```
+
+#### Table S2: Incidence rate ratio of hospital admission due to non-measles infectious disease between post-measles and pre-measles by time after measles 
+
+```{r tabS2, echo=FALSE, results='asis'}
+load(file = "Results/Final/IRR_tab_worse_ar1.Rdata")
+knitr::kable(IRR.tab)
+```
+
+
+
+
+
+### Analysis 2
+#### Emigration population
+In this sensitivity analysis, we simulate the emigration cases from the population since the last vists to the hospital with the mean emigration rate of HCMC is 0.0083 person year.
+
+
+
+```{r eval=FALSE, message=FALSE, warning=FALSE, include=FALSE, paged.print=FALSE}
+# simulate the datasets
+library(mitools)
+num_sim<-20
+set.seed(1234)
+seed_num<-sample(1:10000,size=num_sim,replace = F)
+start_time <- Sys.time()
+data.total.main.sim<-list()
+
+for (i in 1:num_sim){
+  seed_i<-seed_num[i]
+  data.total.main.sim[[i]] <- data.transformed(data=data.raw,option = 2,emigration.rate = 0.0083,seed = seed_i)
+  
+  data.total.main.sim[[i]] %<>%  mutate(flag=1) %>% 
+                                           group_by(patid) %>% 
+                                           mutate(wave=cumsum(flag)) %>% 
+                                           ungroup() %>% as.data.frame()
+
+  data.total.main.sim[[i]]  %<>% mutate(wave=ifelse(period=="after",wave+1,wave)) 
+  
+}
+end_time <- Sys.time()
+(time_consumed1<-end_time - start_time)
+save(data.total.main.sim,file = "Data/data_total_main_sim_ar1.Rdata")
+load(file = "Data/data_total_main_sim_ar1.Rdata")
+
+data.total.main.sim.tmp<-imputationList(data.total.main.sim)
+start_time <- Sys.time()
+fit_sim<-with(data.total.main.sim.tmp, geeglm(status~ sex+ns(age.at.infection,kn=knots.age,Bo = c(0,age.max))+I(time.after.mv>=14/365)+
+             ns(pmax(time.after.mv-14/365,0),kn=knots.time.af.mv-14/365,Bo = c(0,time.max-14/365)),id=patid,corstr="ar1",family=poisson(link = "log"),offset=offset_time),waves=wave)
+end_time <- Sys.time()
+(time_consumed1<-end_time - start_time)
+save(fit_sim,file="Results/Final/fit_sim_sex_ar1.Rdata")
+```
+
+
+```{r eval=FALSE, message=FALSE, warning=FALSE, include=FALSE}
+load(file="Results/Final/fit_sim_sex_ar1.Rdata")
+betas<-lapply(fit_sim,FUN=function(rr){ rr$geese$beta})
+vars<- lapply(fit_sim,FUN = function(rr){rr$geese$vbeta})
+fit<-MIcombine(betas,vars)
+save(fit,file="Results/Final/fit_Sens1_sex_ar1.Rdata")
+time.after.mv<-seq(2/52,6,by=0.01)
+l<-length(time.after.mv)
+mat<-as.matrix(ns(pmax(time.after.mv-14/365,0),kn=knots.time.af.mv-14/365,Bo = c(0,time.max-14/365))-matrix(rep(ns(0,kn=knots.time.af.mv-14/365,Bo = c(0,time.max-14/365)),each=l),nrow=l))
+mat<-cbind(matrix(rep(rep(0,10),l),ncol=10),rep(1,l),mat)
+
+pred<- my.ci.lin.mi(fit, mat, Exp=F) 
+dat<-data.frame(time.after.mv=seq(2/52,6,by=0.01),age.at.infection=0,offset_time=0)
+dat$pred<-pred[,1]
+dat$plo<-pred[,5]
+dat$phi<-pred[,6]
+save(dat,file="Results/Final/dat_sim_result_sex_ar1.Rdata")
+```
+
+#### Figure S2: Predicted incidence rate ratio of hospital admission due to non-measles infectious disease post vs. 2 year pre-measles. The coefficients were estimated based on the Rubin's rule and from data  of 100 simulations.
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+load(file="Results/Final/dat_sim_result_sex_ar1.Rdata")
+p<-ggplot(dat,aes(x=time.after.mv, y=pred)) + geom_line(size=.75,color="#31a354")+
+  geom_ribbon(data=dat,aes(ymin=plo, ymax=phi, x=time.after.mv), alpha = 0.3,fill="#31a354")+coord_cartesian(ylim=c(-3,4)) +
+  scale_y_continuous("IRR relative to before measles",breaks = log(c(1/20,1/8,1/3,1,3,8,50)),labels=c("1/20","1/8","1/3",1,3,8,50))+
+  scale_x_continuous("Time after measles infection [years]",limits = c(0,10),breaks=c(0,1:10),labels=c("0",1:10))+
+  geom_hline(yintercept=0, linetype="dashed", color = "black")+
+  theme_bw() +
+  theme(panel.grid.minor = element_blank(),axis.title.x = element_text(face="bold", colour="black", size=12, margin = margin(t = 20,r = 20,b =20, l = 20)),
+        axis.title.y = element_text(face="bold", colour="black", size=15, margin = margin(t = 20,r = 20,b = 20, l = 20)),
+        axis.text.y = element_text(colour="black", size=15),
+        axis.text.x = element_text( colour="black", size=15),
+        axis.ticks.x=element_blank(),
+        legend.text = element_text(size = 15),
+        legend.title = element_blank(),
+        legend.key = element_rect(colour = NA),
+        strip.text=element_text(face = "bold",size=15))  + coord_cartesian(ylim=c(-4,2),xlim=c(0,6)) 
+ggsave(file = "Results/Final/Figures/Supplementary Figures/S2_Figure.png",   
+    width = 7, 
+    height = 8, dpi=450) 
+p
+
+```
+
+```{r eval=FALSE, message=FALSE, warning=FALSE, include=FALSE}
+load(file="Results/fit_Sens1_sex_ar1.Rdata")
+#Time.est<-Time_estimate(fit,interval = c(2/52,1.5),knots=knots.time.af.mv,time.max=9.8)
+```
+
+
+
+
+```{r message=FALSE, warning=FALSE, include=FALSE, paged.print=FALSE}
+#Make the interpreation table of the regression
+load("Results/Final/fit_Sens1_sex_ar1.Rdata")
+time.after.mv<-c(14/365,21/365,30.4/365,60.8/365,90.25/365,182.5/365,273.8/365,1,1.5,2,3,4,5,5.5,6)
+l<-length(time.after.mv)
+mat<-as.matrix(ns(pmax(time.after.mv-14/365,0),kn=knots.time.af.mv-14/365,Bo = c(0,time.max-14/365))-matrix(rep(ns(0,kn=knots.time.af.mv-14/365,Bo = c(0,time.max-14/365)),each=l),nrow=l))
+mat<-cbind(matrix(rep(rep(0,10),l),ncol=10),rep(1,l),mat)
+
+pred<- my.ci.lin.mi(fit, mat, Exp=T) 
+IRR.tabS1<-data.frame(time.after.mv=c(14/365,21/365,30.4/365,60.8/365,90.25/365,182.5/365,273.8/365,1,1.5,2,3,4,5,5.5,6),age.at.infection=0,offset_time=0)
+IRR.tabS1$pred<-pred[,5]
+IRR.tabS1$plo<-pred[,6]
+IRR.tabS1$phi<-pred[,7]
+IRR.tabS1$time.after.mv <- c("2 weeks","3 weeks","1 month","2 months","3 months","6 months","9 months", "1 year","1.5 year","2 years","3 years","4 years","5 years","5.5 years","6 years")
+IRR.tabS1$IRR <- paste(round(IRR.tabS1$pred,2),"95% CI(",round(IRR.tabS1$plo,2),",",round(IRR.tabS1$phi,2),")")
+IRR.tabS1 <- IRR.tabS1[,c("time.after.mv","IRR")]
+colnames(IRR.tabS1) <- c("Time after measles","Incidence rate ratio(95% CI)")
+save(IRR.tabS1,file = "Results/Final/IRR_tabS1_ar1.Rdata")
+```
+
+#### Table S.3: Incidence rate ratio of hospital admission due to non-measles infectious disease between post-measles and pre-measles by time after measles 
+
+```{r tabS3, echo=FALSE, results='asis'}
+load(file = "Results/Final/IRR_tabS1_ar1.Rdata")
+knitr::kable(IRR.tabS1)
+```
+
+
+
+### Analysis 3
+In this simulation study, we will vary the emigration rate from 0.01 to 0.15 to see when the second phase would disappear. Since the emigration is an independent process with the disease progression therefore it will introduce the noise to blurring the effect of time after MeV.
+
+```{r eval=FALSE, message=FALSE, warning=FALSE, include=FALSE, paged.print=FALSE}
+
+library(mitools)
+emigration_r<-c(0.01,seq(0.1,0.7,by=0.05))
+emigration_r<-c(emigration_r,0.75,0.8,0.85,0.9,0.95,0.975)
+set.seed(1234)
+start_time <- Sys.time()
+data.total.main.sim_2<-list()
+for (i in 1:length(emigration_r)){
+  data.total.main.sim_2[[i]] <- data.transformed(data.raw,option = 2,emigration.rate = emigration_r[i],seed = 1234)
+  
+  
+  data.total.main.sim_2[[i]] %<>%  mutate(flag=1) %>% 
+                                           group_by(patid) %>% 
+                                           mutate(wave=cumsum(flag)) %>% 
+                                           ungroup() %>% as.data.frame()
+
+  data.total.main.sim_2[[i]]  %<>% mutate(wave=ifelse(period=="after",wave+1,wave))
+  
+}
+end_time <- Sys.time()
+(time_consumed1<-end_time - start_time)
+save(data.total.main.sim_2,file = "Data/data_total_main_sim_2_ar1.Rdata")
+```
+
+```{r eval=FALSE, include=FALSE}
+## We fit the Poisson regression mixed effect model with patient is a random intercept, the current age (age.at.infection) and time after MeV (time.after.mv) 
+## are the main covariates.
+load(file = "Data/data_total_main_sim_2_ar1.Rdata")
+start_time <- Sys.time()
+for(i in 1:length(emigration_r)){
+  fit.gee.sim2<- geeglm(status~ sex+ ns(age.at.infection,kn=knots.age,Bo = c(0,age.max))+I(time.after.mv>=14/365)+
+             ns(pmax(time.after.mv-14/365,0),kn=knots.time.af.mv-14/365,Bo = c(0,time.max-14/365)),
+                              id=patid,corstr="ar1",family=poisson(link = "log"),data = data.total.main.sim_2[[i]],offset=offset_time,waves=wave)
+  save(fit.gee.sim2,file=paste("Results/Final/fit_gee_sim2_",i,"_ar1.Rdata",sep=""))
+}
+
+end_time <- Sys.time()
+(time_consumed1<-end_time - start_time)
+```
+
+
+
+```{r eval=FALSE, message=FALSE, warning=FALSE, include=FALSE}
+time.after.mv<-seq(2/52,6,by=0.01)
+l<-length(time.after.mv)
+mat<-as.matrix(ns(pmax(time.after.mv-14/365,0),kn=knots.time.af.mv-14/365,Bo = c(0,time.max-14/365))-matrix(rep(ns(0,kn=knots.time.af.mv-14/365,Bo = c(0,time.max-14/365)),each=l),nrow=l))
+mat<-cbind(matrix(rep(rep(0,10),l),ncol=10),rep(1,l),mat)
+dat<-data.frame(time.after.mv=NA,age.at.infection=NA,offset_time=NA,pred = NA,plo = NA,phi = NA,emigration_rate=NA)
+for(i in 1:length(emigration_r)){
+  load(file=paste("Results/Final/fit_gee_sim2_",i,"_ar1.Rdata",sep=""))
+pred<- my.ci.lin(fit.gee.sim2, mat, Exp=F) 
+dat.tmp<-data.frame(time.after.mv=seq(2/52,6,by=0.01),age.at.infection=0,offset_time=0,pred = pred[,1],plo = pred[,5],phi = pred[,6],emigration_rate=emigration_r[i])
+dat<-rbind(dat,dat.tmp)
+}
+dat<-dat[-1,]
+save(dat,file="Results/Final/dat_sim_2_result_ar1.Rdata")
+```
+
+#### Figure S3: Predicted incidence rate ratio of hospital admission due to non-measles infectious disease post vs. 2 year pre-measles with emigration rate varies from 10 to 950 per 1000 persons per year.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+load(file="Results/Final/dat_sim_2_result_ar1.Rdata")
+emigration_r<-c(0.01,seq(0.1,0.7,by=0.05))
+emigration_r<-c(emigration_r,0.75,0.8,0.85,0.9,0.95,0.975)
+dat$emigration_rate<-factor(dat$emigration_rate,labels=paste(emigration_r*1000,"1000 person-years",sep="/"))
+
+
+p<-ggplot(dat,aes(x=time.after.mv, y=pred)) + geom_line(size=.75,color="#31a354")+
+  geom_ribbon(data=dat,aes(ymin=plo, ymax=phi, x=time.after.mv), alpha = 0.3,fill="#31a354")+coord_cartesian(ylim=c(-3,4)) +facet_wrap(~emigration_rate)+
+  scale_y_continuous("IRR relative to before measles",breaks = log(c(1/150,1/50,1/20,1/8,1/3,1,3,8,50)),labels=c("1/150","1/50","1/20","1/8","1/3",1,3,8,50))+
+  scale_x_continuous("Time after measles infection [years]",limits = c(0,10),breaks=c(0,1:10),labels=c("0",1:10))+
+  geom_hline(yintercept=0, linetype="dashed", color = "black")+
+  theme_bw() +
+  theme(panel.grid.minor = element_blank(),axis.title.x = element_text(face="bold", colour="black", size=15, margin = margin(t = 20,r = 20,b =20, l = 20)),
+        axis.title.y = element_text(face="bold", colour="black", size=15, margin = margin(t = 20,r = 20,b = 20, l = 20)),
+        axis.text.y = element_text( colour="black", size=15),
+        axis.text.x = element_text( colour="black", size=15),
+        axis.ticks.x=element_blank(),
+        legend.text = element_text(size = 15),
+        legend.title = element_blank(),
+        legend.key = element_rect(colour = NA),
+        strip.text=element_text(face = "bold",size=15))  + coord_cartesian(ylim=c(-5,2),xlim=c(0,6)) 
+ggsave(file = "Results/Final/Figures/Supplementary Figures/S3_Figure.png",   
+    width = 17, 
+    height = 12, dpi=450) 
+p
+```
+
+### Analysis 4
+
+Subpopulation of children under 13 years old.
+
+```{r eval=FALSE, include=FALSE}
+## We fit the Poisson regression mixed effect model with patient is a random intercept, the current age (age.at.infection) and time after MeV (time.after.mv) 
+## are the main covariates.
+start_time <- Sys.time()
+fit.gee.sens_13yrs<- geeglm(status~ sex + ns(age.at.infection,kn=knots.age,Bo = c(0,age.max))+I(time.after.mv>=14/365)+
+             ns(pmax(time.after.mv-14/365,0),kn=knots.time.af.mv-14/365,Bo = c(0,time.max-14/365)),id=patid,corstr="ar1",family=poisson(link = "log"),data = subset(data.total.main_2,age.at.infection<=13),offset=offset_time,waves=wave)
+end_time <- Sys.time()
+(time_consumed1<-end_time - start_time)
+save(fit.gee.sens_13yrs,file="Results/Final/fit_gee_sens_13yrs_ar1.Rdata")
+```
+
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+load(file="Results/Final/fit_gee_sens_13yrs_ar1.Rdata")
+time.after.mv<-seq(2/52,6,by=0.01)
+l<-length(time.after.mv)
+mat<-as.matrix(ns(pmax(time.after.mv-14/365,0),kn=knots.time.af.mv-14/365,Bo = c(0,time.max-14/365))-matrix(rep(ns(0,kn=knots.time.af.mv-14/365,Bo = c(0,time.max-14/365)),each=l),nrow=l))
+mat<-cbind(matrix(rep(rep(0,10),l),ncol=10),rep(1,l),mat)
+pred<- my.ci.lin(fit.gee.sens_13yrs, mat, Exp=F) 
+dat<-data.frame(time.after.mv=seq(2/52,6,by=0.01),age.at.infection=0,offset_time=0)
+dat$pred<-pred[,1]
+dat$plo<-pred[,5]
+dat$phi<-pred[,6]
+
+```
+
+#### Figure S4: Incidence rate ratio of hospital admission due to non-measles infectious disease post vs. 2 year pre-measles with patient under 13 years old.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+p<-ggplot(dat,aes(x=time.after.mv, y=pred)) + geom_line(size=.75,color="#31a354")+
+  geom_ribbon(data=dat,aes(ymin=plo, ymax=phi, x=time.after.mv), alpha = 0.3,fill="#31a354")+coord_cartesian(ylim=c(-3,4)) +
+  scale_y_continuous("IRR relative to before measles",breaks = log(c(1/20,1/8,1/3,1,3,8,50)),labels=c("1/20","1/8","1/3",1,3,8,50))+
+  scale_x_continuous("Time after measles infection [years]",limits = c(0,10),breaks=c(0,1:10),labels=c("0",1:10))+
+  geom_hline(yintercept=0, linetype="dashed", color = "black")+
+  theme_bw() +
+  theme(panel.grid.minor = element_blank(),axis.title.x = element_text(face="bold", colour="black", size=15, margin = margin(t = 20,r = 20,b =20, l = 20)),
+        axis.title.y = element_text(face="bold", colour="black", size=15, margin = margin(t = 20,r = 20,b = 20, l = 20)),
+        axis.text.y = element_text(colour="black", size=15),
+        axis.text.x = element_text(colour="black", size=15),
+        axis.ticks.x=element_blank(),
+        legend.text = element_text(size = 15),
+        legend.title = element_blank(),
+        legend.key = element_rect(colour = NA),
+        strip.text=element_text(face = "bold",size=15))  + coord_cartesian(ylim=c(-4,2),xlim=c(0,6)) 
+ggsave(file = "Results/Final/Figures/Supplementary Figures/S4_Figure.png",   
+    width = 7, 
+    height = 8, dpi=450) 
+p
+```
+
+
+
+```{r message=FALSE, warning=FALSE, include=FALSE, paged.print=FALSE}
+#Make the interpreation table of the regression
+time.after.mv<-c(14/365,21/365,30.4/365,60.8/365,90.25/365,182.5/365,273.8/365,1,1.5,2,3,4,5,5.5,6)
+l<-length(time.after.mv)
+mat<-as.matrix(ns(pmax(time.after.mv-14/365,0),kn=knots.time.af.mv-14/365,Bo = c(0,time.max-14/365))-matrix(rep(ns(0,kn=knots.time.af.mv-14/365,Bo = c(0,time.max-14/365)),each=l),nrow=l))
+mat<-cbind(matrix(rep(rep(0,10),l),ncol=10),rep(1,l),mat)
+
+pred<- my.ci.lin(fit.gee.sens_13yrs, mat, Exp=TRUE) 
+IRR.tab<-data.frame(time.after.mv=c(14/365,21/365,30.4/365,60.8/365,90.25/365,182.5/365,273.8/365,1,1.5,2,3,4,5,5.5,6),age.at.infection=0,offset_time=0)
+IRR.tab$pred<-pred[,5]
+IRR.tab$plo<-pred[,6]
+IRR.tab$phi<-pred[,7]
+IRR.tab$time.after.mv <- c("2 weeks","3 weeks","1 month","2 months","3 months","6 months","9 months", "1 year","1.5 year","2 years","3 years","4 years","5 years","5.5 years","6 years")
+IRR.tab$IRR <- paste(round(IRR.tab$pred,2),"95% CI(",round(IRR.tab$plo,2),",",round(IRR.tab$phi,2),")")
+IRR.tab <- IRR.tab[,c("time.after.mv","IRR")]
+colnames(IRR.tab) <- c("Time after measles","Incidence rate ratio(95% CI)")
+save(IRR.tab,file = "Results/Final/IRR_tab_13yrs_ar1.Rdata")
+```
+
+#### Table S4: Incidence rate ratio of hospital admission due to non-measles infectious disease between post-measles and pre-measles by time after measles 
+
+```{r tabS4, echo=FALSE, results='asis'}
+load(file = "Results/Final/IRR_tab_13yrs_ar1.Rdata")
+knitr::kable(IRR.tab)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+### Supporting Data
+
+#### Figure S11: Incidence of mortality due to Communicable, maternal, neonatal, and nutritional diseases by four countries from 1990-2017 *.
+
+```{r echo=FALSE, fig.height=10, fig.width=12, message=FALSE, warning=FALSE}
+dat<-as.data.frame(read_csv("Data/rate_death_ID_global_by_income.csv"))
+dat<-plyr::rename(dat,c("Cause of death or injury"="Cause of death"))
+dat<-subset(dat,select=c("Location","Year","Age","Value","Lower bound","Upper bound","Cause of death"))
+colnames(dat)<-c("Location","Year","Age","Value","Lower_bound","Upper_bound","Cause_of_death")
+dat <- subset(dat,Cause_of_death != "HIV/AIDS and sexually transmitted infections")
+dat$Location<-substr(dat$Location,12,30)
+dat$Location<-factor(dat$Location,levels=c("High Income","Upper Middle Income","Lower Middle Income","Low Income"),labels=c("HI","UMI","LMI","LI"))
+dat$Cause_of_death<-as.factor(dat$Cause_of_death)
+#dat$Cause_of_death<-factor(dat$Cause_of_death,levels=c("Enteric infections","Respiratory infections and tuberculosis","Neglected tropical diseases and malaria","HIV/AIDS and sexually transmitted infections","Other infectious diseases"),labels=c("EI","RI and TB","NTD and malaria","HIV/AIDS and STI","Other IDs"))
+dat$Cause_of_death<-factor(dat$Cause_of_death,levels=c("Respiratory infections and tuberculosis","Enteric infections","Neglected tropical diseases and malaria","HIV/AIDS and sexually transmitted infections","Other infectious diseases"),labels=c("Respiratory infections and TB","Enteric infections","NTD and malaria","HIV/AIDS and STIs","Other infectious diseases"))
+dat$Age<-factor(dat$Age)
+dat$Location<-factor(dat$Location)
+dat<-arrange(dat,Age,Cause_of_death,Location,Year)
+
+dat.new.below5<-subset(dat,Age=="<5 years")
+dat.new.above5<-subset(dat,Age=="5-14 years") 
+dat.min.above5<-subset(dat.new.above5,select=c(Location,Year,Lower_bound,Cause_of_death)) %>% dplyr::rename(Val=Lower_bound)
+
+dat.new.below5<-plyr::join_all(list(dat.new.below5,dat.min.above5))
+
+
+dat.max.below5<-subset(dat.new.below5,select=c(Location,Year,Upper_bound,Cause_of_death)) %>% dplyr::rename(Val=Upper_bound)
+
+dat.new.above5<-plyr::join_all(list(dat.new.above5,dat.max.below5))
+dat.new<-rbind(dat.new.below5,dat.new.above5)
+dat.new<-arrange(dat.new,Age,Cause_of_death,Location,Year)
+
+dat<-plyr::join_all(list(dat,dat.new))
+
+# p<-ggplot(dat,aes(x = Year, y = log2(Value),color=Location,ymin = log2(Lower_bound),ymax = log2(Upper_bound)))+geom_point(aes(x = Year,y=log2(Val)), color = "white")+geom_line(aes(x = Year, y = log2(Value)),size=1)+
+# scale_color_manual(values=c("#3182bd","#31a354","#feb24c","#756bb1"))+geom_ribbon(data=dat,alpha =0.2,linetype = 0,aes(fill=Location))+facet_wrap(~Cause_of_death+Age,nrow=2,scales="free_y")+scale_fill_manual(values=c("#3182bd","#31a354","#feb24c","#756bb1"))+scale_x_continuous("Year", breaks=seq(1990,2017,by=5))+
+# scale_y_continuous("Deaths per 100,000", breaks=log2(c(1e-3,1e-2,1e-1,1,10,100,500)),labels=c(1e-3,1e-2,1e-1,1,10,100,500))+theme_bw() +
+#     theme(axis.title.x = element_text(face="bold", colour="black", size=15, margin = margin(t = 20,r = 20,b =20, l = 20)),
+#         axis.title.y = element_text(face="bold", colour="black", size=15, margin = margin(t = 20,r = 20,b = 20, l = 20)),
+#         axis.text.y = element_text( colour="black", size=15),
+#         axis.text.x = element_text( colour="black", size=15),
+#         axis.ticks.x=element_blank(),
+#         legend.text = element_text(size = 15),
+#         #legend.title = element_blank(),
+#         legend.key = element_rect(colour = NA),
+#         legend.position = "bottom",
+#         strip.text=element_text(face = "bold",size=15),
+#         plot.title=element_text(family='', face='bold', colour='black', size=14))
+# ggsave(file = "Results/Final/Figures/FigureS5.png",   
+#     width = 15, 
+#     height = 9) 
+# p
+
+
+
+p<-ggplot(subset(dat,Year==2015),aes(x = Location, y = Value,color=Age))+labs(fill="Countries")+geom_point(size=1.5,position = position_dodge(width=0.3))+scale_color_manual(values=c("#f03b20","#3182bd"))+facet_wrap(~Cause_of_death,nrow=2) + geom_errorbar(aes(x = Location,ymin = Lower_bound,ymax = Upper_bound),width=0.5,position = position_dodge(width=0.3))+ylab("Probability of death due to infectious diseases ")+scale_y_continuous("Deaths per 100,000", breaks=c(1e-3,1e-2,1e-1,1,10,100,250),labels=c(1e-3,1e-2,1e-1,1,10,100,250),trans="log10")+theme_bw() +
+    theme(axis.title.x = element_text(face="bold", colour="black", size=15, margin = margin(t = 20,r = 20,b =20, l = 20)),
+        axis.title.y = element_text(face="bold", colour="black", size=15, margin = margin(t = 20,r = 20,b = 20, l = 20)),
+        axis.text.y = element_text( colour="black", size=15),
+        axis.text.x = element_text( colour="black", size=15),
+        axis.ticks.x=element_blank(),
+        legend.text = element_text(size = 15),
+        legend.title = element_text(size = 15),
+        legend.key = element_rect(colour = NA), 
+        legend.position = "bottom",
+        strip.text=element_text(face = "bold",size=15),
+        plot.title=element_text(family='', face='bold', colour='black', size=15))
+ggsave(file = "Results/Final/Figures/Supplementary Figures/S11_Figure.png",   
+    width = 10, 
+    height = 9) 
+p
+
+
+```
+
+
+#### Figure S12: Global report on percent of total deaths due to infectious diseases in 2005 and 2015*.
+
+
+```{r echo=FALSE, fig.height=7, fig.width=11, message=FALSE, warning=FALSE}
+dat<-as.data.frame(read_csv("Data/death_ID_global_by_income.csv"))
+dat<-plyr::rename(dat,c("Cause of death or injury"="Cause of death"))
+dat<-subset(dat,select=c("Location","Year","Age","Value","Lower bound","Upper bound","Cause of death"))
+colnames(dat)<-c("Location","Year","Age","Value","Lower_bound","Upper_bound","Cause_of_death")
+dat$Location<-substr(dat$Location,12,30)
+dat$Location<-factor(dat$Location,levels=c("High Income","Upper Middle Income","Lower Middle Income","Low Income"),labels=c("HI","UMI","LMI","LI"))
+
+dat <- subset(dat,!(Cause_of_death %in% c("Chronic respiratory diseases","HIV/AIDS and sexually transmitted infections") ))
+dat$Cause_of_death<-as.factor(dat$Cause_of_death)
+#dat$Cause_of_death<-factor(dat$Cause_of_death,levels=c("Enteric infections","Respiratory infections and tuberculosis","Neglected tropical diseases and malaria","HIV/AIDS and sexually transmitted infections","Other infectious diseases"),labels=c("EI","RI and TB","NTD and malaria","HIV/AIDS and STI","Other IDs"))
+dat$Cause_of_death<-factor(dat$Cause_of_death,levels=c("Respiratory infections and tuberculosis","Enteric infections","Neglected tropical diseases and malaria","Other infectious diseases"),labels=c("Respiratory infections and TB","Enteric infections","NTD and malaria","Other infectious diseases"))
+
+# dat$Cause_of_death<-factor(dat$Cause_of_death,levels=c("Enteric infections","Respiratory infections and tuberculosis","Neglected tropical diseases and malaria","Other infectious diseases"),labels=c("Enteric infections","Respiratory infections and TB","NTD and malaria","Other infectious diseases"))
+p<-ggplot(subset(dat,Year==2015),aes(x = Location, y = Value,color=Age))+labs(fill="Countries")+geom_point(size=1.5,position = position_dodge(width=0.3))+scale_color_manual(values=c("#f03b20","#3182bd"))+facet_wrap(~Cause_of_death,scales="free_y",nrow=2) + geom_errorbar(aes(x = Location,ymin = Lower_bound,ymax = Upper_bound),width=0.5,position = position_dodge(width=0.3))+ylab("Probability of death due to infectious diseases ")+theme_bw() +
+    theme(axis.title.x = element_text(face="bold", colour="black", size=15, margin = margin(t = 20,r = 20,b =20, l = 20)),
+        axis.title.y = element_text(face="bold", colour="black", size=15, margin = margin(t = 20,r = 20,b = 20, l = 20)),
+        axis.text.y = element_text( colour="black", size=15),
+        axis.text.x = element_text( colour="black", size=15),
+        axis.ticks.x=element_blank(),
+        legend.text = element_text(size = 15),
+        legend.title = element_text(size = 15),
+        legend.key = element_rect(colour = NA), 
+        legend.position = "bottom",
+        strip.text=element_text(face = "bold",size=15),
+        plot.title=element_text(family='', face='bold', colour='black', size=15))
+ggsave(file = "Results/Final/Figures/Supplementary Figures/S12_Figure.png",   
+    width = 10, 
+    height = 9) 
+p
+```
+
+
+
+#### Figure S13: Incidence of hospitalization due to measles in HCMC.
+
+```{r echo=FALSE}
+dat.measles<-subset(data.raw, icd.m3=="B05")
+dat.measles %<>% mutate(year=year(date.admit),month=month(date.admit),flag=1)
+dat.measles %<>% group_by(month, year) %>% dplyr::summarise(cases=sum(flag)) %>% ungroup() %>% as.data.frame() %>% arrange(year,month)%>% mutate(month.y=paste(year,month,sep="."))
+
+dat.year<-expand.grid(month=1:12,year=2005:2015) %>% mutate(month.y=paste(year,month,sep="."))
+dat_measles<-merge(dat.year,dat.measles[,c(3,4)],all.x = T,by="month.y")
+dat_measles %<>% mutate(cases=ifelse(is.na(cases),0,cases))%>% arrange(year,month)
+dat_final<-ts(dat_measles[,"cases"],start=c(2005, 1), frequency = 12)
+save(dat_final,file="dat_measles.Rdata")
+
+dat.raw<-data.frame(time=as.vector(time(dat_final)),
+                                 observed= dat_final)
+
+p <- ggplot(dat.raw, aes(x=time,y=observed)) +geom_point(size=1)+
+  theme_bw() + ylab("")+geom_line(colour="red")+  theme_bw() +
+  theme(panel.grid.minor = element_blank(),axis.title.x = element_text(face="bold", colour="black", size=12, margin = margin(t = 20,r = 20,b =20, l = 20)),
+        axis.title.y = element_text(face="bold", colour="black", size=12, margin = margin(t = 20,r = 20,b = 20, l = 20)),
+        axis.text.y = element_text( colour="black", size=12),
+        axis.text.x = element_text( colour="black", size=12),
+        axis.ticks.x=element_blank(),
+        legend.text = element_text(size = 12),
+        legend.title = element_blank(),
+        legend.key = element_rect(colour = NA),
+        strip.text=element_text(face = "bold",size=12)) +ylab("Hospital admissions due to Measles")+xlab("Year")
+ggsave(file = "Results/Final/Figures/Supplementary Figures/S13_Figure.png",     width = 7, # The width of the plot in inches
+    height = 4.5, dpi=450) # The height of the plot in inches
+p
+```
+
+## Extra analysis
+
+#### Figure S5: Piecewise constant hazard vs smooth hazard
+
+In order to check the posibility of overfitting of the model, we will fit the data wioth the piecewise constant incidence rate for 4 time classes after MeV
+ 
+```{r eval=FALSE, include=FALSE}
+
+dat.temp<- data.total.main_2%>% mutate(time.after.mv_cat=cut(time.after.mv,c(-1,0,knots.time.af.mv,4.5,6,8,10), include.lowest=T)) 
+
+formula.cst=status~ sex+ ns(age.at.infection,kn=knots.age,Bo = c(0,age.max))+time.after.mv_cat
+
+cstHazard_ar1<-geeglm(formula.cst,id=patid,corstr="ar1",family=poisson(link = "log"),
+                  data = dat.temp,offset=offset_time,waves=wave)
+
+summary(cstHazard_ar1)
+save(cstHazard_ar1,file="Results/Final/cstHazard_main_ar1.Rdata")
+```
+
+
+```{r echo=FALSE}
+load(file="Results/Final/cstHazard_main_ar1.Rdata")
+hazard=(cstHazard_ar1$coef[11:21])
+coefHazard=cstHazard_ar1$coef
+sd.coefhazard=summary(cstHazard_ar1)$coefficients[,2]
+hazard.inf=(coefHazard-qnorm(0.975,0,1)*sd.coefhazard)[11:21]  
+hazard.sup=(coefHazard+qnorm(0.975,0,1)*sd.coefhazard)[11:21]
+hazard_dat<-data.frame(x1=c(0,knots.time.af.mv,4.5,6,8),x2=c(knots.time.af.mv,4.5,6,8,10), x3=(c(0,knots.time.af.mv,4.5,6,8)+c(knots.time.af.mv,4.5,6,8,10))/2,y=hazard,y0=hazard.inf,y1=hazard.sup)
+```
+
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+load(file="Results/Final/fit_gee_main_ar1.Rdata")
+time.after.mv<-seq(2/52,10,by=0.01)
+l<-length(time.after.mv)
+time.max<-5
+mat<-as.matrix(ns(pmax(time.after.mv-14/365,0),kn=knots.time.af.mv-14/365,Bo = c(0,time.max-14/365))-matrix(rep(ns(0,kn=knots.time.af.mv-14/365,Bo = c(0,time.max-14/365)),each=l),nrow=l))
+mat<-cbind(matrix(rep(rep(0,10),l),ncol=10),rep(1,l),mat)
+pred<- my.ci.lin(fit.gee.main_ar1, mat, Exp=F) 
+dat<-data.frame(time.after.mv=seq(2/52,10,by=0.01),age.at.infection=0,offset_time=0)
+dat$pred<-pred[,1]
+dat$plo<-pred[,5]
+dat$phi<-pred[,6]
+```
+
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+p<-ggplot(dat,aes(x=time.after.mv, y=pred)) + geom_line(size=.75,color="#31a354")+
+  geom_ribbon(data=dat,aes(ymin=plo, ymax=phi, x=time.after.mv), alpha = 0.3,fill="#31a354") +
+  scale_y_continuous("IRR relative to before measles",breaks = log(c(1/50,1/20,1/8,1/3,1,3,8,50)),labels=c(expression(1/50),expression(1/20),expression(1/8),expression(1/3),1,3,8,50))+
+  scale_x_continuous("Time after measles infection [years]",limits = c(0,10),breaks=c(0,1:10),labels=c("0",1:10))+
+  geom_hline(yintercept=0, linetype="dashed", color = "black")+
+  theme_bw() +
+  theme(panel.grid.minor = element_blank(),axis.title.x = element_text(face="bold", colour="black", size=15, margin = margin(t = 20,r = 20,b =20, l = 20)),
+        axis.title.y = element_text(face="bold", colour="black", size=15, margin = margin(t = 20,r = 20,b = 20, l = 20)),
+        axis.text.y = element_text( colour="black", size=15),
+        axis.text.x = element_text( colour="black", size=15),
+        axis.ticks.x=element_blank(),
+        legend.text = element_text(size = 15),
+        legend.title = element_blank(),
+        legend.key = element_rect(colour = NA),
+        strip.text=element_text(face = "bold",size=15))  + coord_cartesian(ylim=c(-4,2),xlim=c(0,6)) +geom_segment(data=hazard_dat,aes(x=x1,xend=x2,y=y,yend=y),col="red", lty=1,size=0.75)+
+  geom_segment(data=hazard_dat,aes(x=x3,xend=x3,y=y0,yend=y1),col="red", lty=2)
+ggsave(file = "Results/Final/Figures/Supplementary Figures/S5_Figure.png",   
+    width = 7, 
+    height = 8, dpi=450) 
+p
+```
+ 
+
+
+
+#### Figure S6: The effect of year on the incidence of hospital admission
+
+```{r eval=FALSE, include=FALSE}
+# do the main analysis with ar1 correlation strucrure
+data.total.main_2<-data.total.main %>% mutate(flag=1) %>% 
+                                       group_by(patid) %>% mutate(wave=cumsum(flag)) %>% ungroup() %>% as.data.frame()
+
+start_time <- Sys.time()
+fit.gee.main_ar1_year<- geeglm(status~ sex + ns(age.at.infection,kn=knots.age,Bo = c(0,age.max))+I(time.after.mv>=14/365)+
+             ns(pmax(time.after.mv-14/365,0),kn=knots.time.af.mv-14/365,Bo = c(0,time.max-14/365))+clendar_time,id=patid,corstr="ar1",family=poisson(link = "log"),data = data.total.main_2,offset=offset_time,waves=wave)
+end_time <- Sys.time()
+(time_consumed1<-end_time - start_time)
+save(fit.gee.main_ar1_year,file="Results/Final/fit_gee_main_ar1_year.Rdata")
+```
+
+
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+load(file="Results/Final/fit_gee_main_ar1_year.Rdata")
+time.after.mv<-seq(2/52,10,by=0.01)
+l<-length(time.after.mv)
+time.max<-5
+mat<-as.matrix(ns(pmax(time.after.mv-14/365,0),kn=knots.time.af.mv-14/365,Bo = c(0,time.max-14/365))-matrix(rep(ns(0,kn=knots.time.af.mv-14/365,Bo = c(0,time.max-14/365)),each=l),nrow=l))
+mat<-cbind(matrix(rep(rep(0,10),l),ncol=10),rep(1,l),mat,rep(0,l))
+pred<- my.ci.lin(fit.gee.main_ar1_year, mat, Exp=F) 
+dat<-data.frame(time.after.mv=seq(2/52,10,by=0.01),age.at.infection=0,offset_time=0)
+dat$pred<-pred[,1]
+dat$plo<-pred[,5]
+dat$phi<-pred[,6]
+```
+
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+p<-ggplot(dat,aes(x=time.after.mv, y=pred)) + geom_line(size=.75,color="#31a354")+
+  geom_ribbon(data=dat,aes(ymin=plo, ymax=phi, x=time.after.mv), alpha = 0.3,fill="#31a354") +
+  scale_y_continuous("IRR relative to before measles",breaks = log(c(1/50,1/20,1/8,1/3,1,3,8,50)),labels=c(expression(1/50),expression(1/20),expression(1/8),expression(1/3),1,3,8,50))+
+  scale_x_continuous("Time after measles infection [years]",limits = c(0,10),breaks=c(0,1:10),labels=c("0",1:10))+
+  geom_hline(yintercept=0, linetype="dashed", color = "black")+
+  theme_bw() +
+  theme(panel.grid.minor = element_blank(),axis.title.x = element_text(face="bold", colour="black", size=15, margin = margin(t = 20,r = 20,b =20, l = 20)),
+        axis.title.y = element_text(face="bold", colour="black", size=15, margin = margin(t = 20,r = 20,b = 20, l = 20)),
+        axis.text.y = element_text( colour="black", size=15),
+        axis.text.x = element_text( colour="black", size=15),
+        axis.ticks.x=element_blank(),
+        legend.text = element_text(size = 15),
+        legend.title = element_blank(),
+        legend.key = element_rect(colour = NA),
+        strip.text=element_text(face = "bold",size=15))  + coord_cartesian(ylim=c(-4,2),xlim=c(0,6)) 
+p
+ggsave(file = "Results/Final/Figures/Supplementary Figures/S6_Figure.png",   
+    width = 7, 
+    height = 8, dpi=450) 
+p
+
+```
+ 
+
+### Analysis 5: Subpopulation of children less than 4 years old with no longer than 2 years post-measles.
+
+```{r eval=FALSE, include=FALSE}
+## We fit the Poisson regression mixed effect model with patient is a random intercept, the current age (age.at.infection) and time after MeV (time.after.mv) 
+## are the main covariates.
+dat<-subset(data.total.main_2,age.at.infection<=4&time.after.mv<=2)
+age.max<-4
+time.max<-2
+knots.time.af.mv<-c(1/12,2/12,5/12,8/12,1,1.5)
+knots.age<-c(1/2,1,1.5,2,2.5,3)
+start_time <- Sys.time()
+fit.gee.sens_4yrs<- geeglm(status~ sex + ns(age.at.infection,kn=knots.age,Bo = c(0,age.max))+I(time.after.mv>=14/365)+
+                             ns(pmax(time.after.mv-14/365,0),kn=knots.time.af.mv-14/365,Bo = c(0,time.max-14/365)),id=patid,corstr="ar1",family=poisson(link = "log"),data = dat,offset=offset_time,waves=wave)
+end_time <- Sys.time()
+(time_consumed1<-end_time - start_time)
+save(fit.gee.sens_4yrs,file="Results/Final/fit_gee_sens_4yrs_ar1.Rdata")
+```
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+dat<-subset(data.total.main_2,age.at.infection<=4&time.after.mv<=2)
+age.max<-4
+time.max<-2
+knots.time.af.mv<-c(1/12,2/12,5/12,8/12,1,1.5)
+knots.age<-c(1/2,1,1.5,2,2.5,3)
+start_time <- Sys.time()
+load(file="Results/Final/fit_gee_sens_4yrs_ar1.Rdata")
+time.after.mv<-seq(2/52,2,by=0.01)
+l<-length(time.after.mv)
+mat<-as.matrix(ns(pmax(time.after.mv-14/365,0),kn=knots.time.af.mv-14/365,Bo = c(0,time.max-14/365))-matrix(rep(ns(0,kn=knots.time.af.mv-14/365,Bo = c(0,time.max-14/365)),each=l),nrow=l))
+mat<-cbind(matrix(rep(rep(0,9),l),ncol=9),rep(1,l),mat)
+pred<- my.ci.lin(fit.gee.sens_4yrs, mat, Exp=F) 
+dat<-data.frame(time.after.mv=seq(2/52,2,by=0.01),age.at.infection=0,offset_time=0)
+dat$pred<-pred[,1]
+dat$plo<-pred[,5]
+dat$phi<-pred[,6]
+
+```
+
+#### Figure S7: Incidence rate ratio of hospital admission due to non-measles infectious disease with children less than 4 years old with no longer than 2 years post-measles..
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+p<-ggplot(dat,aes(x=time.after.mv, y=pred)) + geom_line(size=.75,color="#31a354")+
+  geom_ribbon(data=dat,aes(ymin=plo, ymax=phi, x=time.after.mv), alpha = 0.3,fill="#31a354")+coord_cartesian(ylim=c(-3,4)) +
+  scale_y_continuous("IRR relative to before measles",breaks = log(c(1/20,1/8,1/3,1,3,8,50)),labels=c("1/20","1/8","1/3",1,3,8,50))+
+  scale_x_continuous("Time after measles infection [years]",limits = c(0,10),breaks=c(0,1:10),labels=c("0",1:10))+
+  geom_hline(yintercept=0, linetype="dashed", color = "black")+
+  theme_bw() +
+  theme(panel.grid.minor = element_blank(),axis.title.x = element_text(face="bold", colour="black", size=15, margin = margin(t = 20,r = 20,b =20, l = 20)),
+        axis.title.y = element_text(face="bold", colour="black", size=15, margin = margin(t = 20,r = 20,b = 20, l = 20)),
+        axis.text.y = element_text(colour="black", size=15),
+        axis.text.x = element_text(colour="black", size=15),
+        axis.ticks.x=element_blank(),
+        legend.text = element_text(size = 15),
+        legend.title = element_blank(),
+        legend.key = element_rect(colour = NA),
+        strip.text=element_text(face = "bold",size=15))  + coord_cartesian(ylim=c(-2,2),xlim=c(0,2)) 
+ggsave(file = "Results/Final/Figures/Supplementary Figures/S7_Figure.png",   
+    width = 6, 
+    height = 5, dpi=450) 
+p
+```
+
+
+
+#### Figure S10
+
+```{r echo=FALSE, fig.height=10, fig.width=15, message=FALSE, warning=FALSE, paged.print=TRUE}
+dat.tmp2<-data.total.main %>% arrange(patid,age.at.infection)%>% 
+mutate(time.after.mv_cat=cut(time.after.mv,c(-1,0,10), include.lowest=T)) 
+dat.tmp2 %<>%mutate(time.after.mv_cat=factor(time.after.mv_cat,labels=c("pre-MeV", "post-MeV"))) 
+dat_flup <- dat.tmp2 %>% mutate(clendar_time=ifelse(clendar_time==2004,2005,clendar_time),
+                                clendar_time=ifelse(clendar_time==2016,2015,clendar_time)) %>% group_by(clendar_time,time.after.mv_cat) %>% dplyr::summarise(count=sum(time.interval),.groups="keep") %>% ungroup() %>% as.data.frame()
+ggplot(dat_flup,aes(x=clendar_time,y=count,colour=time.after.mv_cat))+geom_point()+geom_line()+ylab("The amount of follow-up \n [person-year]")+scale_y_continuous(trans='log2')+xlab("Calendar time [year]")+scale_x_continuous(breaks = 2005:2015)+
+  theme_bw() +
+  theme(panel.grid.minor = element_blank(),axis.title.x = element_text(face="bold", colour="black", size=15, margin = margin(t = 20,r = 20,b =20, l = 20)),
+        axis.title.y = element_text(face="bold", colour="black", size=15, margin = margin(t = 20,r = 20,b = 20, l = 20)),
+        axis.text.y = element_text( colour="black", size=15),
+        axis.text.x = element_text( colour="black", size=15),
+        axis.ticks.x=element_blank(),
+        legend.text = element_text(size = 15),
+        legend.title = element_blank(),
+        legend.key = element_rect(colour = NA),
+        strip.text=element_text(face = "bold",size=15)) 
+ggsave(file = "Results/Final/Figures/Supplementary Figures/S10_Figure.png",   # The directory you want to save the file in
+    width = 13, # The width of the plot in inches
+    height = 4, dpi=450)
+
+
+# dat.tmp2 %<>% mutate(age.at.infection_cat=floor(age.at.infection)) 
+# 
+# dat_flup <- dat.tmp2 %>% filter(age.at.infection_cat>5&age.at.infection_cat<=6 )%>%  group_by(period) %>% dplyr::summarise(count=sum(time.interval),.groups="keep") %>% ungroup() %>% as.data.frame()
+# 
+# no_flup_1 <- dat.tmp2 %>% filter(time.after.mv>=1) %>% nrow()
+# no_flup_2 <- dat.tmp2 %>% filter(time.after.mv>=2) %>% nrow()
+# prop<-no_flup_2/no_flup_1
+```
+
+
+<!-- ```{r echo=FALSE,results='asis'} -->
+<!-- data<-data.prepare(data.raw,option = 1,emigration.rate = 0,seed=1234) -->
+<!-- tab<-table(data$outcome,data$period) -->
+<!-- knitr::kable(tab) -->
+<!-- ``` -->
+
+<!-- Percentage of death: 38/48~80% is due to MeV.`  -->
+
+
+#### Assesment of overfitting of using splines to model the two time trends in the main model
+
+In order to assess whether the main model was used in the analysis is over-fitting, we will compare the goodness of fit of the main model with the 2 following models:
+
+- Model 1: we fix the number of knots of time but we remove one knots of age at infection
+
+- Model 2: we fix the number of knots of age but we remove one knot of time post MeV
+
+
+
+```{r eval=FALSE, include=FALSE}
+knots.time.af.mv_2<-c(1/12,2/12,5/12,8/12,1,3)
+knots.age_2<-c(1/2,1,1.5,2,3,5)
+age.max<-7.5
+time.max<-5
+last.knots<-5
+
+start_time <- Sys.time()
+fit.gee.main_test_1<- geeglm(status~ sex + ns(age.at.infection,kn=knots.age_2,Bo = c(0,age.max))+I(time.after.mv>=14/365)+
+             ns(pmax(time.after.mv-14/365,0),kn=knots.time.af.mv-14/365,Bo = c(0,time.max-14/365)),id=patid,corstr="ar1",family=poisson(link = "log"),data = data.total.main_2,offset=offset_time,waves=wave)
+save(fit.gee.main_test_1,file="Results/Final/fit_gee_main_test_1.Rdata")
+
+
+fit.gee.main_test_2<- geeglm(status~ sex + ns(age.at.infection,kn=knots.age,Bo = c(0,age.max))+I(time.after.mv>=14/365)+
+             ns(pmax(time.after.mv-14/365,0),kn=knots.time.af.mv_2-14/365,Bo = c(0,time.max-14/365)),id=patid,corstr="ar1",family=poisson(link = "log"),data = data.total.main_2,offset=offset_time,waves=wave)
+save(fit.gee.main_test_2,file="Results/Final/fit_gee_main_test_2.Rdata")
+
+end_time <- Sys.time()
+(time_consumed1<-end_time - start_time)
+```
+
+
+
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+load(file="Results/Final/fit_gee_main_test_1.Rdata")
+knots.time.af.mv_2<-c(1/12,2/12,5/12,8/12,1,3)
+knots.time.af.mv<-c(1/12,2/12,5/12,8/12,1,1.5,3)
+knots.age_2<-c(1/2,1,1.5,2,3,5)
+knots.age<-c(1/2,1,1.5,2,2.5,3,5)
+
+age.max<-7.5
+time.max<-5
+last.knots<-5
+
+time.after.mv<-seq(2/52,10,by=0.01)
+l<-length(time.after.mv)
+mat<-as.matrix(ns(pmax(time.after.mv-14/365,0),kn=knots.time.af.mv-14/365,Bo = c(0,time.max-14/365))-matrix(rep(ns(0,kn=knots.time.af.mv-14/365,Bo = c(0,time.max-14/365)),each=l),nrow=l))
+mat<-cbind(matrix(rep(rep(0,9),l),ncol=9),rep(1,l),mat)
+pred<- my.ci.lin(fit.gee.main_test_1, mat, Exp=F) 
+dat<-data.frame(time.after.mv=seq(2/52,10,by=0.01),age.at.infection=0,offset_time=0)
+dat$pred<-pred[,1]
+dat$plo<-pred[,5]
+dat$phi<-pred[,6]
+```
+
+
+#### Figure S8: Incidence rate ratio of hospital admission due to non-measles infectious disease post vs. 2 year pre-measles (with 6 knots for age)
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+p<-ggplot(dat,aes(x=time.after.mv, y=pred)) + geom_line(size=.75,color="#31a354")+
+  geom_ribbon(data=dat,aes(ymin=plo, ymax=phi, x=time.after.mv), alpha = 0.3,fill="#31a354") +
+  scale_y_continuous("IRR relative to before measles",breaks = log(c(1/50,1/20,1/8,1/3,1,3,8,50)),labels=c(expression(1/50),expression(1/20),expression(1/8),expression(1/3),1,3,8,50))+
+  scale_x_continuous("Time after measles infection [years]",limits = c(0,10),breaks=c(0,1:10),labels=c("0",1:10))+
+  geom_hline(yintercept=0, linetype="dashed", color = "black")+
+  theme_bw() +
+  theme(panel.grid.minor = element_blank(),axis.title.x = element_text(face="bold", colour="black", size=15, margin = margin(t = 20,r = 20,b =20, l = 20)),
+        axis.title.y = element_text(face="bold", colour="black", size=15, margin = margin(t = 20,r = 20,b = 20, l = 20)),
+        axis.text.y = element_text( colour="black", size=15),
+        axis.text.x = element_text( colour="black", size=15),
+        axis.ticks.x=element_blank(),
+        legend.text = element_text(size = 15),
+        legend.title = element_blank(),
+        legend.key = element_rect(colour = NA),
+
+        strip.text=element_text(face = "bold",size=15))  + coord_cartesian(ylim=c(-4,2),xlim=c(0,6)) 
+ggsave(file = "Results/Final/Figures/Supplementary Figures/S8_Figure.png",   
+    width = 7, 
+    height = 8, dpi=450) 
+p
+
+
+```
+
+
+
+
+
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+load(file="Results/Final/fit_gee_main_test_2.Rdata")
+knots.time.af.mv_2<-c(1/12,2/12,5/12,8/12,1,3)
+age.max<-7.5
+time.max<-5
+last.knots<-5
+time.after.mv<-seq(2/52,10,by=0.01)
+l<-length(time.after.mv)
+mat<-as.matrix(ns(pmax(time.after.mv-14/365,0),kn=knots.time.af.mv_2-14/365,Bo = c(0,time.max-14/365))-matrix(rep(ns(0,kn=knots.time.af.mv_2-14/365,Bo = c(0,time.max-14/365)),each=l),nrow=l))
+mat<-cbind(matrix(rep(rep(0,10),l),ncol=10),rep(1,l),mat)
+pred<- my.ci.lin(fit.gee.main_test_2, mat, Exp=F) 
+dat<-data.frame(time.after.mv=seq(2/52,10,by=0.01),age.at.infection=0,offset_time=0)
+dat$pred<-pred[,1]
+dat$plo<-pred[,5]
+dat$phi<-pred[,6]
+```
+
+
+#### Figure S9: Incidence rate ratio of hospital admission due to non-measles infectious disease post vs. 2 year pre-measles (with 6 knots for times)
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+p<-ggplot(dat,aes(x=time.after.mv, y=pred)) + geom_line(size=.75,color="#31a354")+
+  geom_ribbon(data=dat,aes(ymin=plo, ymax=phi, x=time.after.mv), alpha = 0.3,fill="#31a354") +
+  scale_y_continuous("IRR relative to before measles",breaks = log(c(1/50,1/20,1/8,1/3,1,3,8,50)),labels=c(expression(1/50),expression(1/20),expression(1/8),expression(1/3),1,3,8,50))+
+  scale_x_continuous("Time after measles infection [years]",limits = c(0,10),breaks=c(0,1:10),labels=c("0",1:10))+
+  geom_hline(yintercept=0, linetype="dashed", color = "black")+
+  theme_bw() +
+  theme(panel.grid.minor = element_blank(),axis.title.x = element_text(face="bold", colour="black", size=15, margin = margin(t = 20,r = 20,b =20, l = 20)),
+        axis.title.y = element_text(face="bold", colour="black", size=15, margin = margin(t = 20,r = 20,b = 20, l = 20)),
+        axis.text.y = element_text( colour="black", size=15),
+        axis.text.x = element_text( colour="black", size=15),
+        axis.ticks.x=element_blank(),
+        legend.text = element_text(size = 15),
+        legend.title = element_blank(),
+        legend.key = element_rect(colour = NA),
+
+        strip.text=element_text(face = "bold",size=15))  + coord_cartesian(ylim=c(-4,2),xlim=c(0,6)) 
+p
+ggsave(file = "Results/Final/Figures/Supplementary Figures/S9_Figure.png",   
+    width = 7, 
+    height = 8) 
+```
+
+
